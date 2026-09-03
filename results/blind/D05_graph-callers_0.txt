@@ -1,0 +1,41 @@
+## Review of `app/pricing.py`
+
+**FINDING: app/pricing.py** | `apply_bulk_discount` uses `quantity > threshold` while the docstring says the discount applies when the order *reaches* `BULK_THRESHOLD`, so an order of exactly 10 units gets no discount (off-by-one).
+
+**FINDING: app/pricing.py** | The existing test `test_bulk_discount_applies_at_threshold` fails against this code: `apply_bulk_discount(10, 100)` returns `1000`, not the asserted `900`.
+
+**FINDING: app/pricing.py** | `compute_total` now takes a required third parameter `tax_rate`, but `app/orders.py:create_order` still calls `pricing.compute_total(quantity, unit_cents)`, which raises `TypeError: compute_total() missing 1 required positional argument`.
+
+**FINDING: app/pricing.py** | `apply_bulk_discount` returns inconsistent types — `int(...)` on the discount path but the raw `unit_cents * quantity` (a float if `unit_cents` is a float) on the non-discount path — so callers can receive fractional cents.
+
+**FINDING: app/pricing.py** | Money is truncated with `int()` rather than rounded (e.g. `int(999.99)` → `999`), systematically under-charging by up to a cent per line and truncating toward zero for negative amounts.
+
+**FINDING: app/pricing.py** | Truncation happens twice — once in `apply_bulk_discount` and again in `compute_total` — compounding the rounding error instead of rounding once at the end.
+
+**FINDING: app/pricing.py** | `get("BULK_THRESHOLD")` is called with no default; if the key is ever absent `get` returns `None` and `quantity > None` raises `TypeError` in Python 3.
+
+**FINDING: app/pricing.py** | The discount rate `0.9` is a hardcoded magic number even though the threshold it pairs with is configurable, so the two can drift apart and the rate can't be tuned per environment.
+
+**FINDING: app/pricing.py** | No validation of inputs: negative `quantity`/`unit_cents` produce negative totals, and a `None` or string `tax_rate` raises `TypeError` deep inside the arithmetic rather than at the boundary.
+
+**FINDING: app/pricing.py** | `compute_total` has no test coverage at all (the only test exercises `apply_bulk_discount`), so the new `tax_rate` parameter and the caller breakage went undetected.
+
+**FINDING: app/pricing.py** | Pricing ignores the per-order `discount_pct` column that `app/db.py`/`Order` carry, so a stored customer discount is silently dropped from the computed total.
+
+## Context files (for completeness)
+
+**FINDING: app/orders.py** | `get_order_summary` dereferences `order.id` without checking for `None`, but `repository.get_order` returns `None` for a missing order, causing `AttributeError`.
+
+**FINDING: app/repository.py** | With `MAX_RETRIES: 0` the loop runs exactly once, so the documented retry behaviour never happens; the loop also retries with no backoff and re-runs a deterministic query that will return the same result.
+
+**FINDING: app/utils.py** | `parse_money` loses a cent to binary float error — `int(float("12.34") * 100)` is `1233`, not `1234`; it should use `Decimal` or `round`.
+
+**FINDING: app/utils.py** | `clamp` silently returns `low` when callers pass `low > high` instead of rejecting the inverted range.
+
+**FINDING: app/db.py** | `fetch_order_row` leaks the connection if `cur.execute` or `fetchone` raises, since `conn.close()` is not in a `try/finally` or `with` block.
+
+**FINDING: app/orders.py** | `_normalise` assigns to a local named `STATUS_OPEN` that shadows the module constant, which is dead/misleading code that reads like it mutates the constant.
+
+**FINDING: app/events.py** | `publish` has no error isolation — one raising subscriber aborts delivery to all remaining subscribers for that topic.
+
+**FINDING: app/config.py** | `SETTINGS` is a mutable module-level dict returned by reference-free `get`, so any caller can mutate global configuration at runtime.

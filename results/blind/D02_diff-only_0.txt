@@ -1,0 +1,33 @@
+Reviewing `app/utils.py` directly — it's two small functions and the output format is specified, so no skill workflow applies here.
+
+**Analysis**
+
+`parse_money` does binary float math on decimal input, then truncates:
+- `float("12.34") * 100` → `1233.9999999999998` → `int(...)` → **1233**, not 1234. Same for `"1.15"`, `"4.35"`, `"70.07"`, and many other common amounts.
+- `int()` truncates toward zero rather than rounding, so `"-1.15"` → `-114` while `"1.15"` → `114` — asymmetric behavior around zero.
+
+`clamp` has no ordering precondition and inherits `min`/`max` NaN semantics.
+
+---
+
+FINDING: app/utils.py | `parse_money` uses binary floating-point arithmetic on decimal input, so representation error makes common amounts off by one cent (e.g. `parse_money("12.34")` returns 1233 because `float("12.34") * 100 == 1233.9999999999998`); it should use `decimal.Decimal` on the raw string.
+
+FINDING: app/utils.py | `int()` truncates toward zero instead of rounding, so any sub-cent residue is dropped rather than rounded (`parse_money("0.999")` → 99, not 100) — `round()` or `Decimal.quantize` with an explicit rounding mode is needed.
+
+FINDING: app/utils.py | Truncation toward zero makes the function asymmetric for negative amounts: `parse_money("-12.34")` → -1233 and `parse_money("-0.999")` → -99, so refunds/credits round in the opposite direction from charges, producing accounting drift.
+
+FINDING: app/utils.py | `parse_money` silently accepts inputs with more than two decimal places (`"12.3456"` → 1234) instead of rejecting or explicitly rounding them, hiding malformed or higher-precision upstream data.
+
+FINDING: app/utils.py | `parse_money` performs no input validation or error handling: non-numeric input such as `"abc"`, `""`, or `"$12.34"` raises an unhandled `ValueError`, and `None` raises `TypeError`, so callers get raw exceptions rather than a documented failure mode.
+
+FINDING: app/utils.py | `parse_money` accepts `"nan"`, `"inf"`, `"-inf"`, and overflowing literals like `"1e400"`, which pass `float()` and then raise `ValueError`/`OverflowError` inside `int()` — an unexpected crash path for what is nominally a parse function.
+
+FINDING: app/utils.py | `parse_money` accepts non-money textual formats that `float()` happens to allow — scientific notation (`"1e5"` → 10000000), PEP 515 underscores (`"1_2.34"` → 1234), leading/trailing whitespace, and a leading `+` — so invalid money strings are parsed instead of rejected.
+
+FINDING: app/utils.py | For very large magnitudes `float` loses integer precision before conversion, so `parse_money` can return a value that is not the exact cent count of the input string (e.g. inputs beyond 2^53 cents).
+
+FINDING: app/utils.py | `clamp` does not validate that `low <= high`; when the bounds are inverted it silently returns `low`, a value outside the intended range, rather than raising `ValueError`.
+
+FINDING: app/utils.py | `clamp` mishandles NaN because of `min`/`max` short-circuit semantics: `clamp(float("nan"), 0, 10)` returns `10` (the bound) instead of propagating NaN or raising, and a NaN bound silently corrupts the result.
+
+FINDING: app/utils.py | `clamp` has no docstring and neither function has type hints or documented return units/contract, so callers cannot tell that `parse_money` returns cents-as-int or what `clamp`'s bound ordering requirement is.

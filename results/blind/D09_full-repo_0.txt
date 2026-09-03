@@ -1,0 +1,32 @@
+## Review of `app/events.py` (with context files)
+
+FINDING: app/events.py | `publish_order_created` publishes to `get("DEFAULT_TOPIC")` == `"order.created"`, but the only subscriber in `app/handlers.py` registers under `"order_created"` (underscore), so the handler is never invoked — the pub/sub path is silently dead.
+FINDING: app/events.py | `publish` silently no-ops when a topic has no subscribers (`_SUBSCRIBERS.get(topic, [])`), so misspelled/mismatched topic strings like the one above fail invisibly instead of raising or logging.
+FINDING: app/events.py | Topics are unvalidated free-form strings with no registry or constant, so there is no way to catch typos at import time; `DEFAULT_TOPIC` and the handler's literal drift apart with no error.
+FINDING: app/events.py | `publish` has no exception isolation — if one subscriber raises, every subsequent subscriber for that topic is skipped and the exception propagates into the caller of `publish_order_created`.
+FINDING: app/events.py | `publish` iterates the live subscriber list returned by `.get()`, so a handler that calls `subscribe` (or any concurrent `subscribe`) mutates the list mid-iteration, causing skipped or double-dispatched handlers.
+FINDING: app/events.py | `publish` discards each handler's return value (e.g. `on_order_created` returns `f"handled {id}"`), so callers get no results and no indication of how many subscribers ran.
+FINDING: app/events.py | `subscribe` does not deduplicate, so registering the same function twice (e.g. a module re-imported under a different name, or a re-run test setup) delivers the payload twice.
+FINDING: app/events.py | There is no `unsubscribe`/`clear` API and `_SUBSCRIBERS` is module-global mutable state, so subscriptions leak across tests and long-lived processes with no way to remove a handler.
+FINDING: app/events.py | `get("DEFAULT_TOPIC")` returns `None` if the setting is ever missing/renamed (`config.get` defaults to `None`), and `publish(None, payload)` then silently delivers nothing instead of failing loudly.
+FINDING: app/events.py | `publish_order_created` depends on `app.handlers` having been imported for its import-time `subscribe` side effect, but `events.py` never imports it; in any process that doesn't import `handlers`/`tasks` first, publishing is a no-op.
+FINDING: app/events.py | `_SUBSCRIBERS` is mutated and read without any lock, so concurrent `subscribe`/`publish` from multiple threads can race on the per-topic list.
+FINDING: app/events.py | The same `payload` object is passed by reference to every subscriber, so a handler mutating it silently changes what later subscribers receive.
+FINDING: app/handlers.py | Subscribes with the literal `"order_created"` rather than the configured `DEFAULT_TOPIC`, duplicating the topic string in a second place and creating the mismatch with `events.publish_order_created`.
+FINDING: app/orders.py | `create_order` calls `pricing.compute_total(quantity, unit_cents)` with two arguments, but `compute_total` requires a third `tax_rate` parameter — every order creation raises `TypeError`.
+FINDING: app/orders.py | `get_order_summary` dereferences `order.id` without handling `repository.get_order` returning `None` for a missing order, raising `AttributeError` instead of a meaningful error.
+FINDING: app/orders.py | `_normalise` assigns to a local named `STATUS_OPEN`, shadowing the module constant and misleadingly implying it mutates it; the constant is unchanged and the local name is meaningless.
+FINDING: app/pricing.py | `apply_bulk_discount` uses `quantity > threshold` while its docstring says the discount applies "when the order reaches BULK_THRESHOLD" — an off-by-one that skips the discount at exactly 10 units.
+FINDING: tests/test_pricing.py | `test_bulk_discount_applies_at_threshold` asserts `apply_bulk_discount(10, 100) == 900` but the implementation returns `1000` at the threshold, so this test fails as written.
+FINDING: app/pricing.py | `apply_bulk_discount` returns `int(...)` in the discounted branch but the raw `unit_cents * quantity` otherwise, so the return type/rounding is inconsistent for non-integer `unit_cents`.
+FINDING: app/pricing.py | `compute_total` truncates with `int()` instead of rounding, systematically under-charging by up to one cent per line.
+FINDING: app/db.py | The query selects `discount_pct`, but `schema.sql` defines the column as `discount_percent`, so `fetch_order_row` raises `sqlite3.OperationalError: no such column`.
+FINDING: app/db.py | The connection is never closed if `cur.execute`/`fetchone` raises (no `try/finally` or context manager), leaking sqlite connections on error.
+FINDING: app/serializers.py | `order_to_dict` reads `order.discount`, but the `Order` dataclass field is `discount_percent`, so serialization always raises `AttributeError`.
+FINDING: app/repository.py | With `MAX_RETRIES = 0` the loop runs exactly once, so the documented retry behavior is disabled by default and the retry loop has no backoff and no exception handling — it only retries falsy rows, not transient DB errors.
+FINDING: app/repository.py | `get_order` returns `None` on failure with no distinction between "not found" and "DB unavailable", pushing an untyped null onto every caller.
+FINDING: app/api.py | `create` indexes `payload["customerId"]`, `payload["quantity"]`, and `payload["unit_cents"]` with no validation, so a malformed request raises an unhandled `KeyError` (and the key naming mixes camelCase and snake_case).
+FINDING: app/api.py | `route` overwrites any existing entry in `ROUTES` for the same path without warning, silently discarding a duplicate registration, and the routes carry no HTTP method.
+FINDING: app/tasks.py | `run_task` builds an attribute name from caller-supplied `name` and `getattr`s it off the whole `handlers` module, so any module-level attribute starting with `on_` (including imported names) is callable by an untrusted caller.
+FINDING: app/utils.py | `parse_money` uses binary float math and truncating `int()`, so `parse_money("12.34")` yields 1233 cents instead of 1234.
+FINDING: app/utils.py | `clamp` silently returns `low` when callers pass `low > high` instead of rejecting the invalid range.

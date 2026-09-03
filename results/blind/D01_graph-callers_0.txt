@@ -1,0 +1,27 @@
+Reviewed `app/pricing.py` against its docstrings, its caller in `app/orders.py`, and `tests/test_pricing.py`.
+
+FINDING: app/pricing.py | Off-by-one in `apply_bulk_discount`: the docstring says the discount applies "when the order reaches BULK_THRESHOLD units" but the code uses `quantity > threshold` instead of `>=`, so an order of exactly 10 units gets no discount.
+
+FINDING: app/pricing.py | The existing test `test_bulk_discount_applies_at_threshold` (asserting `apply_bulk_discount(10, 100) == 900`) fails with this code, which returns 1000 — the change is shipping a red test.
+
+FINDING: app/pricing.py | `compute_total` now takes a required third parameter `tax_rate`, but `app/orders.py:create_order` still calls `pricing.compute_total(quantity, unit_cents)` with two arguments, so every order creation raises `TypeError`.
+
+FINDING: app/pricing.py | The new `tax_rate` parameter has no default value, making this a breaking API change for all existing callers; defaulting it to `0` would preserve backwards compatibility.
+
+FINDING: app/pricing.py | `int(...)` truncates toward zero rather than rounding, so totals are silently under-charged by up to a cent (e.g. `compute_total(1, 333, 0.075)` → `int(357.975)` = 357 instead of 358).
+
+FINDING: app/pricing.py | Truncation is applied twice — once inside `apply_bulk_discount` and again in `compute_total` — compounding the rounding loss on discounted lines.
+
+FINDING: app/pricing.py | `apply_bulk_discount` returns inconsistent types/precision across branches: the discounted branch returns a truncated `int`, while the non-discounted branch returns the raw `unit_cents * quantity` product (a `float` if either input is a float), so callers see different rounding behaviour depending on quantity.
+
+FINDING: app/pricing.py | Money is computed with binary floating point (`* 0.9`, `* (1 + tax_rate)`) rather than integer or `Decimal` arithmetic, which introduces representation error into cent-precision values.
+
+FINDING: app/pricing.py | `get("BULK_THRESHOLD")` passes no fallback default, so if the key is ever missing from `SETTINGS` the function gets `None` and `quantity > None` raises `TypeError` instead of degrading to "no discount".
+
+FINDING: app/pricing.py | No validation of inputs: negative or zero `quantity`, negative `unit_cents`, or a negative/absurd `tax_rate` are accepted silently and produce negative or nonsensical totals (and `int()` truncating toward zero rounds negative amounts the wrong way for credits/refunds).
+
+FINDING: app/pricing.py | The `tax_rate` unit is undocumented and ambiguous — `1 + tax_rate` assumes a fraction (0.07), while the adjacent domain model uses percentages (`discount_pct` in `app/db.py`), so a caller passing `7` would multiply the total by 8.
+
+FINDING: app/pricing.py | The 0.9 bulk-discount multiplier is a hardcoded magic number while its companion threshold lives in `app/config.py`, so the discount rate cannot be tuned alongside the threshold.
+
+FINDING: tests/test_pricing.py | No test covers `compute_total` at all, so the new `tax_rate` parameter, the tax math, and the double-truncation behaviour are entirely unverified, and the signature change breaking `app/orders.py` is not caught.

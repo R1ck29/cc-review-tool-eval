@@ -1,0 +1,95 @@
+{
+  "repo": "/private/tmp/claude-501/-Users-rick-Dropbox-python-projects-data-science-LLM-claude-code-cost-quality-eval-cc/c68179da-81d3-4008-a3ba-31c7baae3d3c/scratchpad/repo_scaled",
+  "depth": 2,
+  "max_results": 500,
+  "repo_files": 316,
+  "full_repo_tokens": 44303,
+  "mean_ctx_tokens": 19104.916666666668,
+  "mean_payload_tokens": 51122.5,
+  "rows": [
+    {
+      "changed": "services/notify_00/config.py",
+      "files": 60,
+      "ctx_tokens": 2928,
+      "payload_tokens": 23731,
+      "truncated": false
+    },
+    {
+      "changed": "services/billing_00/pricing.py",
+      "files": 170,
+      "ctx_tokens": 37160,
+      "payload_tokens": 90283,
+      "truncated": true
+    },
+    {
+      "changed": "services/reports_01/pricing.py",
+      "files": 170,
+      "ctx_tokens": 37160,
+      "payload_tokens": 90286,
+      "truncated": true
+    },
+    {
+      "changed": "services/accounts_02/__init__.py",
+      "files": 4,
+      "ctx_tokens": 675,
+      "payload_tokens": 9604,
+      "truncated": false
+    },
+    {
+      "changed": "services/accounts_04/pricing.py",
+      "files": 170,
+      "ctx_tokens": 37160,
+      "payload_tokens": 90296,
+      "truncated": true
+    },
+    {
+      "changed": "services/shipping_04/__init__.py",
+      "files": 4,
+      "ctx_tokens": 675,
+      "payload_tokens": 9597,
+      "truncated": false
+    },
+    {
+      "changed": "services/audit_00/repository.py",
+      "files": 170,
+      "ctx_tokens": 37160,
+      "payload_tokens": 90293,
+      "truncated": true
+    },
+    {
+      "changed": "services/notify_04/pricing.py",
+      "files": 170,
+      "ctx_tokens": 37160,
+      "payload_tokens": 90278,
+      "truncated": true
+    },
+    {
+      "changed": "services/webhooks_02/repository.py",
+      "files": 170,
+      "ctx_tokens": 37160,
+      "payload_tokens": 90327,
+      "truncated": true
+    },
+    {
+      "changed": "services/accounts_03/__init__.py",
+      "files": 4,
+      "ctx_tokens": 675,
+      "payload_tokens": 9610,
+      "truncated": false
+    },
+    {
+      "changed": "services/shipping_01/__init__.py",
+      "files": 4,
+      "ctx_tokens": 675,
+      "payload_tokens": 9604,
+      "truncated": false
+    },
+    {
+      "changed": "services/catalog_01/__init__.py",
+      "files": 4,
+      "ctx_tokens": 671,
+      "payload_tokens": 9561,
+      "truncated": false
+    }
+  ]
+}

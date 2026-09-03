@@ -1,0 +1,21 @@
+Reviewed `app/pricing.py` against its docstrings, its test, and the config/utility code it depends on.
+
+FINDING: app/pricing.py | `apply_bulk_discount` uses `quantity > threshold`, but the docstring says the discount applies when the order "reaches" BULK_THRESHOLD units, so the discount is off by one and never fires at exactly the threshold.
+FINDING: app/pricing.py | The existing test `test_bulk_discount_applies_at_threshold` fails with this code: with BULK_THRESHOLD=10, `apply_bulk_discount(10, 100)` returns 1000, not the asserted 900.
+FINDING: app/pricing.py | `int(...)` truncates toward zero instead of rounding, so both the discount and the tax computation systematically under-collect up to a cent per call rather than rounding half-up.
+FINDING: app/pricing.py | Money is computed in binary floating point (`* 0.9`, `* (1 + tax_rate)`); representation error can make an exact result land just below the integer (e.g. 269.99999999999997) and truncation then loses a full cent — monetary math should use `Decimal` or integer arithmetic.
+FINDING: app/pricing.py | `apply_bulk_discount` returns inconsistent types across branches: the discounted branch returns `int`, while the non-discounted branch returns `unit_cents * quantity` uncast, which is a float whenever `unit_cents` is a float.
+FINDING: app/pricing.py | `compute_total` truncates twice (once inside `apply_bulk_discount`, once on the taxed total), compounding rounding loss, and it applies tax to the already-truncated subtotal rather than to the exact discounted amount.
+FINDING: app/pricing.py | The discount creates a price cliff with no monotonicity guard: at threshold 10, quantity 11 costs 990 while quantity 10 costs 1000, so buying more units costs the customer less.
+FINDING: app/pricing.py | `get("BULK_THRESHOLD")` can return `None` (the `config.get` default) if the key is ever missing or renamed, and `quantity > None` raises `TypeError` at runtime instead of failing at import/config-load time.
+FINDING: app/pricing.py | The threshold is read from config but the 0.9 discount multiplier is a hardcoded magic number, so the discount rate cannot be tuned and the two halves of the same business rule can drift apart.
+FINDING: app/pricing.py | No validation of inputs: negative or zero `quantity`, negative `unit_cents`, and `None`/negative `tax_rate` are all accepted and silently produce nonsense totals (and `None` tax_rate raises an unhandled `TypeError`).
+FINDING: app/pricing.py | `tax_rate` units are undocumented and unchecked; a caller passing a percentage (e.g. `8.5` instead of `0.085`) yields a 9.5x total with no error.
+FINDING: app/pricing.py | For negative amounts (refunds/credits) `int()` truncates toward zero, i.e. rounds *up* in value, giving a rounding direction opposite to the positive case.
+FINDING: app/pricing.py | `apply_bulk_discount` assumes `quantity` is numeric and comparable to the config value; a string quantity (or a string threshold in config, e.g. `"10"`) raises `TypeError` rather than being coerced or rejected explicitly.
+FINDING: tests/test_pricing.py | Test coverage is inadequate: `compute_total` is untested entirely, and there are no cases for below-threshold, just-above-threshold, zero/negative quantity, or tax rounding.
+FINDING: app/utils.py | `parse_money` has the same truncation bug that feeds `unit_cents` into pricing: `int(float("12.34") * 100)` evaluates to 1233, silently losing a cent on common inputs.
+FINDING: app/db.py | `fetch_order_row` leaks the sqlite connection if `cur.execute`/`fetchone` raises, since `conn.close()` is not in a `finally` or `with` block.
+FINDING: app/repository.py | The retry loop in `get_order` re-queries with no backoff and cannot distinguish "transient failure" from "order does not exist", so with a larger MAX_RETRIES it would pointlessly re-run the same query for a genuinely missing order; also, any exception from `db.fetch_order_row` propagates and defeats the retry entirely.
+FINDING: app/config.py | `MAX_RETRIES: 0` combined with `get("MAX_RETRIES") + 1` means a missing key would raise `TypeError` on `None + 1`, and the setting's name/semantics ("retries" vs "attempts") are easy to misread.
+FINDING: app/events.py | `publish` has no error isolation: one subscriber raising an exception aborts delivery to all remaining subscribers for that topic.

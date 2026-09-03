@@ -1,0 +1,18 @@
+I've reviewed `app/events.py` against its collaborators (`handlers.py`, `config.py`, `tasks.py`, `orders.py`).
+
+**Core defect:** `publish_order_created` resolves the topic to `config.SETTINGS["DEFAULT_TOPIC"]` = `"order.created"` (dot), but the only subscriber in the codebase registers under `"order_created"` (underscore) at `app/handlers.py:9`. The lookup `_SUBSCRIBERS.get(topic, [])` returns an empty list, so `publish` silently iterates nothing — no error, no handler run.
+
+FINDING: app/events.py | `publish_order_created` publishes to `DEFAULT_TOPIC` (`"order.created"`) while the only registered subscriber in `app/handlers.py:9` uses `"order_created"`, so the handler is never invoked.
+FINDING: app/events.py | `publish` silently no-ops on an unknown/misspelled topic (`_SUBSCRIBERS.get(topic, [])`), turning subscriber-wiring bugs like the topic mismatch above into invisible failures instead of errors.
+FINDING: app/events.py | `get("DEFAULT_TOPIC")` falls back to `None` if the key is ever missing or renamed in `app/config.py`, and `publish(None, payload)` then quietly delivers to nobody rather than raising.
+FINDING: app/events.py | `publish` discards each subscriber's return value, so `handlers.on_order_created`'s `f"handled {payload.get('id')}"` result is unreachable through the pub/sub path and `publish_order_created` gives the caller no delivery feedback (not even a count of handlers run).
+FINDING: app/events.py | Subscriber registration relies on `app.handlers` having been imported for its import-time side effect; `events.py` does not import it, so calling `publish_order_created` from a path that never imports `app.handlers` (or `app.tasks`) drops the event.
+FINDING: app/events.py | An exception raised by one subscriber propagates out of `publish` and prevents all later subscribers on the same topic from running, coupling unrelated handlers to each other.
+FINDING: app/events.py | `subscribe` performs no deduplication, so a module imported/registered twice (e.g. via both `app.handlers` and a re-import under a different name) appends the same callback again and the handler fires multiple times per event.
+FINDING: app/events.py | `publish` iterates the live list stored in `_SUBSCRIBERS` rather than a copy, so a subscriber that calls `subscribe`/unsubscribes for the same topic during dispatch mutates the list mid-iteration.
+FINDING: app/events.py | `from app.config import get` binds the function object at import time, so tests or runtime code that monkeypatch `app.config.get` (rather than mutating `SETTINGS`) will not affect topic resolution here.
+FINDING: app/events.py | Importing `get` unqualified shadows the very generic name `get` in the `app.events` namespace (exposing `events.get` as the config getter), diverging from the `from app import config` / `config.get(...)` style used in `app/tasks.py`.
+FINDING: app/events.py | `publish_order_created` has no caller anywhere in the repo — `orders.create_order` never emits the event — so the order-created notification path is dead code as wired.
+FINDING: app/events.py | Module-level mutable `_SUBSCRIBERS` has no reset/unsubscribe API, so tests that import handler modules leak subscriptions across test cases with no way to clear them.
+FINDING: app/events.py | No tests cover `subscribe`/`publish`/`publish_order_created` (only `tests/test_pricing.py` exists), which is why the topic mismatch is not caught by the suite.
+FINDING: app/events.py | Function signatures lack the type annotations required by the project's Python style rules (`topic: str`, `fn: Callable[[dict], Any]`, `payload: dict`).

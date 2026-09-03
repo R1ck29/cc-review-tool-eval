@@ -1,0 +1,43 @@
+## Analysis
+
+I traced the full data path feeding `order_to_dict`: `schema.sql` → `db.fetch_order_row` → `repository.get_order` → `Order` → `serializers.order_to_dict`.
+
+**Primary defect:** `app/serializers.py:10` reads `order.discount`, but the `Order` dataclass (`app/models.py:10`) defines the field as `discount_percent`. The grep confirms `discount` is defined nowhere — the only spellings in the repo are `discount_percent` (model + schema) and `discount_pct` (a separate, also-wrong SQL alias in `db.py:16`). Since `Order` is a plain `@dataclass` with no `__getattr__`, this raises `AttributeError` on *every* invocation, not just an edge case. It goes undetected because `order_to_dict` has no callers and no tests.
+
+The read path is broken independently too: `db.py:16` selects `discount_pct` from a table whose column is `discount_percent`, so `fetch_order_row` raises `OperationalError` before a model is ever built.
+
+## Findings
+
+FINDING: app/serializers.py | `order.discount` does not exist on the `Order` dataclass (the field is `discount_percent` in app/models.py:10), so `order_to_dict` raises `AttributeError` on every call.
+
+FINDING: app/serializers.py | The emitted wire key `"discount"` is ambiguous and inconsistent with the model/schema name `discount_percent`, so consumers can misinterpret a percentage value as an absolute discount amount.
+
+FINDING: app/serializers.py | `order_to_dict` has no guard for `order is None`, yet `repository.get_order` returns `None` when no row is found, so serializing a missing order fails with `AttributeError: 'NoneType' object has no attribute 'id'`.
+
+FINDING: app/serializers.py | `order_to_dict` has no return type annotation (should be `-> dict`), violating the project rule requiring type annotations on all function signatures.
+
+FINDING: app/serializers.py | The new serializer has zero test coverage and no callers, which is why the unconditional `AttributeError` on `order.discount` was not caught before review.
+
+FINDING: app/db.py | The SELECT lists column `discount_pct`, but `schema.sql` defines the column as `discount_percent`, so `fetch_order_row` raises `sqlite3.OperationalError: no such column: discount_pct` and the entire order-read path feeding the serializer fails.
+
+FINDING: app/db.py | `connect()`/cursor are not wrapped in a context manager or try/finally, so the connection leaks whenever `cur.execute` raises (which it always does here, given the bad column name).
+
+FINDING: app/repository.py | `get_order` builds `Order(*row)` positionally, so any future change to the SELECT column order in `db.py` silently misassigns fields (e.g. `status` into `discount_percent`) rather than failing loudly.
+
+FINDING: app/repository.py | With `MAX_RETRIES` defaulting to `0`, `attempts` is 1 and the retry loop never actually retries, contradicting the docstring's "retrying per MAX_RETRIES"; the loop also retries on `None` rather than on transient errors.
+
+FINDING: app/orders.py | `create_order` calls `pricing.compute_total(quantity, unit_cents)` with two arguments, but `compute_total` requires a third `tax_rate` parameter, so every `POST /orders` request raises `TypeError`.
+
+FINDING: app/orders.py | `get_order_summary` dereferences `order.id` without checking that `repository.get_order` returned a model, raising `AttributeError` for a nonexistent order id.
+
+FINDING: app/orders.py | `_normalise` assigns to a local variable named `STATUS_OPEN`, shadowing the module-level constant and making the function's intent misleading dead-looking code.
+
+FINDING: app/pricing.py | `apply_bulk_discount` uses `quantity > threshold` while the docstring says the discount applies when the order "reaches" the threshold, an off-by-one that makes `tests/test_pricing.py::test_bulk_discount_applies_at_threshold` fail (returns 1000, expects 900).
+
+FINDING: app/pricing.py | `compute_total` truncates with `int()` instead of rounding, systematically under-charging tax by up to one cent per order line.
+
+FINDING: app/events.py | `publish_order_created` publishes to the `DEFAULT_TOPIC` value `"order.created"` (dotted), but `app/handlers.py:9` subscribes to `"order_created"` (underscored), so the handler is never invoked.
+
+FINDING: app/utils.py | `parse_money` computes `int(float(raw) * 100)`, which truncates binary float error and turns `"12.34"` into `1233` cents instead of `1234`.
+
+FINDING: app/api.py | `create` indexes `payload["customerId"]`, `payload["quantity"]`, and `payload["unit_cents"]` without validation, raising an unhandled `KeyError` on malformed requests, and mixes camelCase and snake_case key conventions in the same payload.

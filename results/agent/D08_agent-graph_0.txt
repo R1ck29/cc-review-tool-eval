@@ -1,0 +1,17 @@
+## Review of `app/db.py`
+
+Graph impact: `db.py` → `repository.get_order` → `orders.get_order_summary` / `serializers.order_to_dict`, plus `config.get`. Only `get_order` calls `fetch_order_row` (graph edge `repository.py:11`), so the blast radius runs through the row → `Order` → wire path. Reading that path against `schema.sql` and `models.py`:
+
+FINDING: app/db.py | The SELECT reads a column named `discount_pct`, but the `orders` table in `schema.sql` defines it as `discount_percent`, so every call raises `sqlite3.OperationalError: no such column: discount_pct` and order lookup is completely broken.
+FINDING: app/db.py | `conn.close()` on line 21 is not protected by `try/finally` or a context manager, so any exception from `cur.execute`/`fetchone` (including the guaranteed bad-column error above) leaks the sqlite connection and its file handle on every retry attempt.
+FINDING: app/db.py | The function returns a bare positional tuple that `repository.get_order` splats into `Order(*row)`, so the SELECT's column list and order are an undocumented contract with `models.Order` — adding, dropping, or reordering a column silently mis-assigns fields (e.g. `status` receiving a discount) instead of failing loudly.
+FINDING: app/db.py | The selected column alias (`discount_pct`) diverges from both the DB column (`discount_percent`) and the model field (`discount_percent`), and from `serializers.order_to_dict`'s expected `discount`, leaving three different names for one value along the row→model→wire path.
+FINDING: app/db.py | `connect()` opens a brand-new sqlite connection (and re-reads `DB_PATH` from config) on every single `fetch_order_row` call, so a retried lookup in `repository.get_order` pays full connection setup/teardown per attempt with no pooling or reuse.
+FINDING: app/db.py | The cursor `cur` is never closed and no `with conn` transaction scope is used, so cursor resources are only reclaimed incidentally when the connection is closed.
+FINDING: app/repository.py | `get_order`'s retry loop re-calls `fetch_order_row` when it returns `None`, but `db.fetch_order_row` documents `None` as "no such order" — a permanent condition — so retries are guaranteed-useless duplicate queries.
+FINDING: app/repository.py | The retry loop does not wrap `db.fetch_order_row` in `try/except`, so the actual transient/operational failures raised by the changed SQL propagate on the first attempt and are never retried, defeating the stated `MAX_RETRIES` purpose.
+FINDING: app/repository.py | `get("MAX_RETRIES") + 1` raises `TypeError` if the key is ever missing or set to `None`, since `config.get` returns `None` by default rather than a numeric fallback.
+FINDING: app/orders.py | `get_order_summary` dereferences `order.id`/`order.customer_id` without a `None` check, so the `None` that `fetch_order_row` returns for a missing order propagates through `repository.get_order` and crashes with `AttributeError: 'NoneType' object has no attribute 'id'`.
+FINDING: app/serializers.py | `order_to_dict` reads `order.discount`, but the `Order` dataclass built from the fetched row defines the field as `discount_percent`, so serializing any order fetched via `db.fetch_order_row` raises `AttributeError`.
+
+The first finding is the blocking one: with `discount_pct` vs. `discount_percent`, no order can be loaded at all.

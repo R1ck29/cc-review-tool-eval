@@ -1,0 +1,33 @@
+Reviewed `app/models.py` against every consumer of the model classes in the provided context.
+
+FINDING: app/models.py | The `Order` field is named `discount_percent`, but `app/serializers.py:order_to_dict` reads `order.discount`, so serializing any order raises `AttributeError: 'Order' object has no attribute 'discount'`.
+
+FINDING: app/serializers.py | `order_to_dict` accesses the non-existent attribute `order.discount` instead of `order.discount_percent`, breaking all wire serialization of orders.
+
+FINDING: app/db.py | The SELECT lists a column `discount_pct`, but `schema.sql` defines the column as `discount_percent`, so `fetch_order_row` raises `sqlite3.OperationalError: no such column: discount_pct` for every lookup.
+
+FINDING: app/models.py | `Order` is constructed only via positional unpacking (`Order(*row)` in `app/repository.py`), so the dataclass field order is silently coupled to the SQL column order — any reordering of fields or of the SELECT list produces mismatched values (e.g. status and discount swapped) with no error.
+
+FINDING: app/models.py | `discount_percent: float` has no default and no Optional annotation, yet `schema.sql` allows the column to be NULL (`DEFAULT 0.0` without `NOT NULL`), so orders with a NULL discount produce an `Order` whose `discount_percent` is `None`, breaking any arithmetic on it.
+
+FINDING: app/models.py | The `Customer` dataclass is never constructed or referenced anywhere (no customers table exists in `schema.sql` and no repository loads it), so it is dead code that suggests a missing table/loader.
+
+FINDING: app/models.py | `Order.id`/`customer_id`/`total_cents` are typed but unvalidated and the dataclass is not frozen, so nothing prevents negative totals, out-of-range `discount_percent` (e.g. 150), or accidental mutation of a loaded row.
+
+FINDING: app/repository.py | `get_order` returns `None` when the row is missing, but `app/orders.py:get_order_summary` immediately dereferences `order.id`, so a missing order raises `AttributeError: 'NoneType' object has no attribute 'id'` instead of a clean not-found error.
+
+FINDING: app/repository.py | With `MAX_RETRIES` set to `0` in config, `attempts` is 1 and the documented retry behaviour never happens; the loop also retries with no backoff and re-reads the same deterministic query, so it can never succeed on a later attempt anyway.
+
+FINDING: app/repository.py | `get("MAX_RETRIES") + 1` raises `TypeError` if the key is ever absent, because `config.get` returns `None` by default rather than a numeric fallback.
+
+FINDING: app/handlers.py | The handler subscribes to the topic `"order_created"` while `app/events.py:publish_order_created` publishes to `DEFAULT_TOPIC` = `"order.created"`, so `on_order_created` is never invoked.
+
+FINDING: app/orders.py | The module imports `app.pricing`, which does not exist in the package, so importing `app.orders` (and therefore `create_order`) fails with `ModuleNotFoundError`.
+
+FINDING: app/orders.py | `_normalise` assigns to a local variable named `STATUS_OPEN`, shadowing the module-level constant; it works by accident but is misleading and will silently break if someone expects the constant to be read there.
+
+FINDING: app/orders.py | `create_order` returns a plain dict rather than the `Order` model and omits `id`/`discount_percent`, so its output is incompatible with `serializers.order_to_dict` and with every other consumer of `Order`.
+
+FINDING: app/db.py | `connect()`/`fetch_order_row` never use a context manager or `try/finally`, so an exception during `execute`/`fetchone` leaks the sqlite connection.
+
+FINDING: app/events.py | `publish` iterates the subscriber list directly, so a handler that calls `subscribe` for the same topic mutates the list mid-iteration, and any handler raising an exception silently prevents all later subscribers from running.

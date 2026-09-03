@@ -1,0 +1,20 @@
+I reviewed `app/db.py` and traced its callers (`app/repository.py` → `app/orders.py` → `app/serializers.py`) plus `schema.sql`.
+
+The core defect: the `SELECT` names a column that does not exist in the schema.
+
+- `app/db.py:16` selects `discount_pct`
+- `schema.sql:5` defines `discount_percent`
+
+So `cur.execute(...)` raises `sqlite3.OperationalError: no such column: discount_pct` on **every** call — `fetch_order_row` can never return a row, and `repository.get_order` / `orders.get_order_summary` are dead in production. The mismatch also compounds a second issue: because the failure happens between `connect()` and `conn.close()`, and there is no `try/finally` or `with` block, every failed call leaks an open SQLite connection.
+
+FINDING: app/db.py | The SELECT queries a non-existent column `discount_pct` while `schema.sql` defines it as `discount_percent`, so `fetch_order_row` raises `sqlite3.OperationalError: no such column: discount_pct` on every invocation.
+FINDING: app/db.py | `conn.close()` is not protected by `try/finally` or a `with` block, so any exception from `cur.execute()` or `cur.fetchone()` (which the column-name bug guarantees) leaks the SQLite connection and its file handle.
+FINDING: app/db.py | The docstring promises "or None if there is no such order", but the function actually raises `sqlite3.OperationalError` instead of returning `None`, so callers written against the documented contract handle the wrong failure mode.
+FINDING: app/db.py | `connect()` passes `get("DB_PATH")` unchecked; if the key is ever absent `get` returns `None` and `sqlite3.connect(None)` raises `TypeError` rather than a clear configuration error.
+FINDING: app/db.py | `DB_PATH` is the relative path `orders.db`, so `sqlite3.connect` silently creates a new empty database (with no `orders` table) whenever the process CWD differs, turning a misconfiguration into a "no such table" error at query time instead of a startup failure.
+FINDING: app/db.py | A new connection is opened and closed on every `fetch_order_row` call with no connection reuse or pooling, which multiplies per-call overhead under the retry loop in `repository.get_order`.
+FINDING: app/repository.py | `get_order` retries only while `row` is falsy and does not catch `sqlite3.Error`, so the `OperationalError` raised by `fetch_order_row` propagates immediately and the documented `MAX_RETRIES` behaviour never applies to actual database failures.
+FINDING: app/repository.py | The retry loop re-issues an identical query with no backoff or state change between attempts, so if a row is genuinely missing it performs `MAX_RETRIES + 1` pointless queries before returning `None`.
+FINDING: app/orders.py | `get_order_summary` dereferences `order.id` without a `None` check, so when `repository.get_order` returns `None` for a missing order it raises `AttributeError: 'NoneType' object has no attribute 'id'` instead of reporting "order not found".
+FINDING: app/serializers.py | `order_to_dict` reads `order.discount`, but `Order` (app/models.py:10) defines the field as `discount_percent`, so serializing any order built from `fetch_order_row` raises `AttributeError`.
+FINDING: app/models.py | `Order.discount_percent` is annotated `float`, but `schema.sql` declares `discount_percent REAL DEFAULT 0.0` without `NOT NULL`, so `fetch_order_row` can yield `None` for that column and violate the model's declared type.

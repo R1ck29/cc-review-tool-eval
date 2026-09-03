@@ -1,0 +1,15 @@
+Reviewing `app/serializers.py` against the models and repository it depends on.
+
+**Primary defect:** `order_to_dict` reads `order.discount`, but `Order` (app/models.py:7) declares the field as `discount_percent`. Dataclasses don't define `__getattr__`, so every call raises `AttributeError: 'Order' object has no attribute 'discount'` — the function is unconditionally broken, not an edge case.
+
+FINDING: app/serializers.py | `order.discount` does not exist on `Order` (the field is `discount_percent`), so every call to `order_to_dict` raises `AttributeError` unconditionally.
+FINDING: app/serializers.py | The `discount_percent` field is never serialized, so even after the attribute name is corrected the payload silently omits/renames a model field unless the `"discount"` key is intentional and documented.
+FINDING: app/serializers.py | The output key `"discount"` drops the unit suffix that the model carries (`discount_percent`), making it ambiguous to consumers whether the value is a percentage, a fraction, or a cents amount — inconsistent with the explicit `total_cents` key alongside it.
+FINDING: app/serializers.py | No guard against `order is None`, yet `repository.get_order` returns `None` on lookup failure, so a straight-through call site fails with an opaque `AttributeError` instead of a meaningful error or `None` result.
+FINDING: app/serializers.py | The module docstring promises "(de)serialization" but only a serializer exists — there is no `dict_to_order`, so wire payloads cannot be round-tripped back into models.
+FINDING: app/serializers.py | The function has an annotated parameter but no return annotation (`-> dict`), so type checkers cannot verify the payload shape at call sites — a typed signature plus a mypy run would have caught the `order.discount` bug before merge.
+FINDING: app/serializers.py | `discount_percent` is a `float` and is emitted raw, so a value like `12.3` serializes as `12.299999999999999` in some JSON encoders; a money-adjacent field should use an integer basis-points/cents representation or explicit rounding.
+FINDING: app/serializers.py | There is no test exercising `order_to_dict` — any test constructing a real `Order` and calling this function would have failed immediately, so the missing coverage is what let the broken attribute reach review.
+FINDING: app/repository.py | `Order(*row)` unpacks the DB row positionally, so any column-order change or added column silently maps values onto the wrong fields (e.g. `discount_percent` receiving `total_cents`) rather than failing loudly — use keyword construction from a mapping.
+FINDING: app/repository.py | The retry loop treats a legitimately absent order the same as a transient fetch failure, re-querying `MAX_RETRIES + 1` times with no backoff and no distinction between "not found" and "error".
+FINDING: app/repository.py | `get("MAX_RETRIES") + 1` raises `TypeError` if the config key is missing and `get` returns `None`, and yields zero-retry or negative-range behavior for unvalidated non-positive values.

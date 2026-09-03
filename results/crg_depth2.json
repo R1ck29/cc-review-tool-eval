@@ -1,0 +1,396 @@
+{
+  "repo": "<REPO>/bench/repo",
+  "depth": 2,
+  "repo_files": 15,
+  "full_repo_tokens": 1100,
+  "rows": [
+    {
+      "id": "D01",
+      "class": "L",
+      "changed": "app/pricing.py",
+      "evidence": [
+        "app/pricing.py"
+      ],
+      "static_edge": true,
+      "graph_payload_tokens": 5299,
+      "graph_files": [
+        "app/config.py",
+        "app/db.py",
+        "app/events.py",
+        "app/pricing.py",
+        "app/repository.py",
+        "app/utils.py",
+        "tests/test_pricing.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": true,
+      "diff-only_tokens": 136,
+      "diff-only_missing": [],
+      "graph_hit": true,
+      "graph_tokens": 586,
+      "graph_missing": [],
+      "graph+callers_hit": true,
+      "graph+callers_tokens": 715,
+      "graph+callers_missing": []
+    },
+    {
+      "id": "D02",
+      "class": "L",
+      "changed": "app/utils.py",
+      "evidence": [
+        "app/utils.py"
+      ],
+      "static_edge": true,
+      "graph_payload_tokens": 1139,
+      "graph_files": [
+        "app/pricing.py",
+        "app/utils.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": true,
+      "diff-only_tokens": 48,
+      "diff-only_missing": [],
+      "graph_hit": true,
+      "graph_tokens": 184,
+      "graph_missing": [],
+      "graph+callers_hit": true,
+      "graph+callers_tokens": 184,
+      "graph+callers_missing": []
+    },
+    {
+      "id": "D03",
+      "class": "L",
+      "changed": "app/orders.py",
+      "evidence": [
+        "app/orders.py"
+      ],
+      "static_edge": true,
+      "graph_payload_tokens": 2441,
+      "graph_files": [
+        "app/__init__.py",
+        "app/api.py",
+        "app/handlers.py",
+        "app/orders.py",
+        "app/repository.py",
+        "app/tasks.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": true,
+      "diff-only_tokens": 129,
+      "diff-only_missing": [],
+      "graph_hit": true,
+      "graph_tokens": 426,
+      "graph_missing": [],
+      "graph+callers_hit": true,
+      "graph+callers_tokens": 426,
+      "graph+callers_missing": []
+    },
+    {
+      "id": "D04",
+      "class": "L",
+      "changed": "app/db.py",
+      "evidence": [
+        "app/db.py"
+      ],
+      "static_edge": true,
+      "graph_payload_tokens": 4276,
+      "graph_files": [
+        "app/config.py",
+        "app/db.py",
+        "app/events.py",
+        "app/pricing.py",
+        "app/repository.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": true,
+      "diff-only_tokens": 124,
+      "diff-only_missing": [],
+      "graph_hit": true,
+      "graph_tokens": 503,
+      "graph_missing": [],
+      "graph+callers_hit": true,
+      "graph+callers_tokens": 503,
+      "graph+callers_missing": []
+    },
+    {
+      "id": "D05",
+      "class": "X",
+      "changed": "app/pricing.py",
+      "evidence": [
+        "app/orders.py"
+      ],
+      "static_edge": true,
+      "graph_payload_tokens": 5299,
+      "graph_files": [
+        "app/config.py",
+        "app/db.py",
+        "app/events.py",
+        "app/pricing.py",
+        "app/repository.py",
+        "app/utils.py",
+        "tests/test_pricing.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": false,
+      "diff-only_tokens": 136,
+      "diff-only_missing": [
+        "app/orders.py"
+      ],
+      "graph_hit": false,
+      "graph_tokens": 586,
+      "graph_missing": [
+        "app/orders.py"
+      ],
+      "graph+callers_hit": true,
+      "graph+callers_tokens": 715,
+      "graph+callers_missing": []
+    },
+    {
+      "id": "D06",
+      "class": "X",
+      "changed": "app/repository.py",
+      "evidence": [
+        "app/orders.py"
+      ],
+      "static_edge": true,
+      "graph_payload_tokens": 6572,
+      "graph_files": [
+        "app/__init__.py",
+        "app/api.py",
+        "app/config.py",
+        "app/db.py",
+        "app/events.py",
+        "app/handlers.py",
+        "app/models.py",
+        "app/orders.py",
+        "app/pricing.py",
+        "app/repository.py",
+        "app/serializers.py",
+        "app/tasks.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": false,
+      "diff-only_tokens": 96,
+      "diff-only_missing": [
+        "app/orders.py"
+      ],
+      "graph_hit": true,
+      "graph_tokens": 965,
+      "graph_missing": [],
+      "graph+callers_hit": true,
+      "graph+callers_tokens": 965,
+      "graph+callers_missing": []
+    },
+    {
+      "id": "D07",
+      "class": "X",
+      "changed": "app/models.py",
+      "evidence": [
+        "app/serializers.py"
+      ],
+      "static_edge": true,
+      "graph_payload_tokens": 3040,
+      "graph_files": [
+        "app/__init__.py",
+        "app/config.py",
+        "app/models.py",
+        "app/repository.py",
+        "app/serializers.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": false,
+      "diff-only_tokens": 59,
+      "diff-only_missing": [
+        "app/serializers.py"
+      ],
+      "graph_hit": true,
+      "graph_tokens": 293,
+      "graph_missing": [],
+      "graph+callers_hit": true,
+      "graph+callers_tokens": 730,
+      "graph+callers_missing": []
+    },
+    {
+      "id": "D08",
+      "class": "H",
+      "changed": "app/db.py",
+      "evidence": [
+        "schema.sql"
+      ],
+      "static_edge": false,
+      "graph_payload_tokens": 4276,
+      "graph_files": [
+        "app/config.py",
+        "app/db.py",
+        "app/events.py",
+        "app/pricing.py",
+        "app/repository.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": false,
+      "diff-only_tokens": 124,
+      "diff-only_missing": [
+        "schema.sql"
+      ],
+      "graph_hit": false,
+      "graph_tokens": 503,
+      "graph_missing": [
+        "schema.sql"
+      ],
+      "graph+callers_hit": false,
+      "graph+callers_tokens": 503,
+      "graph+callers_missing": [
+        "schema.sql"
+      ]
+    },
+    {
+      "id": "D09",
+      "class": "H",
+      "changed": "app/events.py",
+      "evidence": [
+        "app/handlers.py"
+      ],
+      "static_edge": false,
+      "graph_payload_tokens": 4291,
+      "graph_files": [
+        "app/config.py",
+        "app/db.py",
+        "app/events.py",
+        "app/pricing.py",
+        "app/repository.py",
+        "app/tasks.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": false,
+      "diff-only_tokens": 82,
+      "diff-only_missing": [
+        "app/handlers.py"
+      ],
+      "graph_hit": false,
+      "graph_tokens": 574,
+      "graph_missing": [
+        "app/handlers.py"
+      ],
+      "graph+callers_hit": true,
+      "graph+callers_tokens": 624,
+      "graph+callers_missing": []
+    },
+    {
+      "id": "D10",
+      "class": "H",
+      "changed": "app/serializers.py",
+      "evidence": [
+        "app/api.py"
+      ],
+      "static_edge": false,
+      "graph_payload_tokens": 1586,
+      "graph_files": [
+        "app/models.py",
+        "app/repository.py",
+        "app/serializers.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": false,
+      "diff-only_tokens": 73,
+      "diff-only_missing": [
+        "app/api.py"
+      ],
+      "graph_hit": false,
+      "graph_tokens": 228,
+      "graph_missing": [
+        "app/api.py"
+      ],
+      "graph+callers_hit": false,
+      "graph+callers_tokens": 228,
+      "graph+callers_missing": [
+        "app/api.py"
+      ]
+    },
+    {
+      "id": "D11",
+      "class": "H",
+      "changed": "app/handlers.py",
+      "evidence": [
+        "app/tasks.py"
+      ],
+      "static_edge": false,
+      "graph_payload_tokens": 2332,
+      "graph_files": [
+        "app/__init__.py",
+        "app/api.py",
+        "app/handlers.py",
+        "app/orders.py",
+        "app/repository.py",
+        "app/tasks.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": false,
+      "diff-only_tokens": 50,
+      "diff-only_missing": [
+        "app/tasks.py"
+      ],
+      "graph_hit": true,
+      "graph_tokens": 426,
+      "graph_missing": [],
+      "graph+callers_hit": true,
+      "graph+callers_tokens": 426,
+      "graph+callers_missing": []
+    },
+    {
+      "id": "D12",
+      "class": "H",
+      "changed": "app/config.py",
+      "evidence": [
+        "app/repository.py"
+      ],
+      "static_edge": false,
+      "graph_payload_tokens": 6734,
+      "graph_files": [
+        "app/__init__.py",
+        "app/config.py",
+        "app/db.py",
+        "app/events.py",
+        "app/models.py",
+        "app/pricing.py",
+        "app/repository.py",
+        "tests/test_pricing.py"
+      ],
+      "full-repo_hit": true,
+      "full-repo_tokens": 1100,
+      "full-repo_missing": [],
+      "diff-only_hit": false,
+      "diff-only_tokens": 65,
+      "diff-only_missing": [
+        "app/repository.py"
+      ],
+      "graph_hit": true,
+      "graph_tokens": 597,
+      "graph_missing": [],
+      "graph+callers_hit": true,
+      "graph+callers_tokens": 597,
+      "graph+callers_missing": []
+    }
+  ]
+}

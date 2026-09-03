@@ -1,0 +1,45 @@
+FINDING: app/db.py | `fetch_order_row` has no `try/finally` or context manager, so if `cur.execute` or `fetchone` raises (locked DB, missing table, bad type) `conn.close()` is skipped and the connection/file handle leaks for the life of the process.
+
+FINDING: app/db.py | The cursor is never closed explicitly; it is only reclaimed when the connection object is garbage-collected, which compounds the leak on the exception path.
+
+FINDING: app/db.py | The function's docstring promises "None if there is no such order", but any operational error (missing table, locked DB, corrupt file) propagates as a raw `sqlite3` exception, so callers relying on the documented contract will crash instead of seeing `None`.
+
+FINDING: app/db.py | Because errors propagate instead of being caught/retried here, `repository.get_order`'s retry loop can never retry a transient DB failure — it only re-runs on a legitimate "row not found", which is deterministic and will never succeed on a second attempt.
+
+FINDING: app/db.py | `connect()` passes the relative path `"orders.db"` straight to `sqlite3.connect`, so the resolved database depends on the process's current working directory, and different callers/services silently read different files.
+
+FINDING: app/db.py | `sqlite3.connect` creates an empty database file when the path does not exist, so a misconfigured `DB_PATH` silently produces an empty DB and a confusing "no such table: orders" error rather than a clear configuration failure.
+
+FINDING: app/db.py | `get("DB_PATH")` returns `None` when the key is absent (config's `get` defaults to `None`), and `sqlite3.connect(None)` raises `TypeError` — the path is never validated.
+
+FINDING: app/db.py | A brand-new connection is opened and torn down on every single call with no pooling or reuse, which multiplies per-query cost and is amplified by the caller's retry loop.
+
+FINDING: app/db.py | `connect()` uses the default `timeout`/no busy handler, so concurrent writers surface as immediate `database is locked` errors rather than being waited out.
+
+FINDING: app/db.py | The SELECT's column order is positionally coupled to `Order(*row)` in the repository, so adding, removing, or reordering a column here silently mis-assigns every downstream field with no error.
+
+FINDING: app/db.py | `order_id` is passed through unvalidated; due to SQLite type affinity a string `"5"` will not match an INTEGER `id`, so a caller passing a stringified id gets a silent `None` instead of the order.
+
+FINDING: app/db.py | `discount_pct` is selected (and carried into `Order`) but no code path in `pricing.py` ever applies a per-order discount, so the fetched discount is silently ignored in total computation.
+
+FINDING: app/db.py | The connection is opened outside the `try`-less body with no `with conn:` transaction scope; while harmless for a pure SELECT today, the pattern will silently leave implicit transactions open if a write is ever added to this module.
+
+FINDING: app/repository.py | `MAX_RETRIES` is `0` in config, so `attempts == 1` and the documented "retrying per MAX_RETRIES" behavior is entirely dead code.
+
+FINDING: app/repository.py | `get("MAX_RETRIES") + 1` raises `TypeError` if the key is ever removed from `SETTINGS`, since `config.get` returns `None` by default.
+
+FINDING: app/repository.py | The retry loop retries on a falsy row, but an order that does not exist will never appear on a later attempt, so retries burn connections without any chance of a different outcome (and an empty/zero-valued row would be treated as "not found").
+
+FINDING: app/pricing.py | `apply_bulk_discount` uses `quantity > threshold` while the docstring says the discount applies "when the order reaches BULK_THRESHOLD units" — an off-by-one that denies the discount at exactly 10 units.
+
+FINDING: app/pricing.py | Money is computed with binary floats (`* 0.9`, `* (1 + tax_rate)`) and truncated with `int()`, which rounds toward zero and can lose a cent per line; `Decimal` or integer arithmetic with explicit rounding is needed.
+
+FINDING: app/pricing.py | `compute_total` truncates twice (once inside `apply_bulk_discount`, once at the end), compounding the rounding error on discounted orders.
+
+FINDING: app/events.py | `publish` invokes handlers without any exception isolation, so one failing subscriber aborts the loop and silently starves every subsequent subscriber of the event.
+
+FINDING: app/events.py | `publish` iterates the live subscriber list, so a handler that calls `subscribe` for the same topic mutates the list during iteration (undefined ordering / possible unbounded growth).
+
+FINDING: app/config.py | `SETTINGS` is a mutable module-level dict with no defensive copy, so any caller can mutate global configuration at runtime and affect every other module.
+
+FINDING: app/config.py | `TASK_HANDLER_PREFIX` is defined but referenced nowhere in the provided code, suggesting either dead config or a missing consumer.

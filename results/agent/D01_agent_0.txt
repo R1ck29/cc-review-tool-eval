@@ -1,0 +1,17 @@
+I reviewed `app/pricing.py` against its callers, config, and tests.
+
+FINDING: app/pricing.py | Off-by-one in `apply_bulk_discount`: the condition `quantity > threshold` excludes the threshold itself, contradicting the docstring ("when the order reaches BULK_THRESHOLD units") so an order of exactly 10 units gets no discount.
+FINDING: tests/test_pricing.py | The existing test `test_bulk_discount_applies_at_threshold` fails with this change — `apply_bulk_discount(10, 100)` returns 1000, not the asserted 900, because of the `>` vs `>=` boundary.
+FINDING: app/pricing.py | `compute_total` gained a required third parameter `tax_rate` with no default, which is a breaking signature change for existing callers.
+FINDING: app/orders.py | `create_order` calls `pricing.compute_total(quantity, unit_cents)` with only two arguments and now raises `TypeError: compute_total() missing 1 required positional argument: 'tax_rate'` on every order creation.
+FINDING: app/api.py | The `POST /orders` route is broken end-to-end because `orders.create_order` unconditionally hits the `compute_total` arity mismatch, so the endpoint raises instead of returning an order.
+FINDING: app/pricing.py | `get("BULK_THRESHOLD")` is called without a default, so if the setting is absent or renamed `threshold` is `None` and `quantity > None` raises `TypeError: '>' not supported between instances of 'int' and 'NoneType'` rather than falling back safely.
+FINDING: app/pricing.py | `apply_bulk_discount` returns an `int` on the discount path but `unit_cents * quantity` unconverted on the non-discount path, so a float `unit_cents` yields a float total and an inconsistent return type for callers expecting cents as `int`.
+FINDING: app/pricing.py | The 10% discount is applied via float multiplication and truncated with `int()`, which rounds toward zero instead of rounding to nearest cent and can lose a cent to binary floating-point representation error (e.g. a product computing to 8189.999999 truncates to 8189).
+FINDING: app/pricing.py | `compute_total` truncates the taxed amount with `int(subtotal * (1 + tax_rate))`, systematically under-charging tax by up to one cent per line instead of rounding (or using `Decimal`) for monetary values.
+FINDING: app/pricing.py | The discount rate `0.9` is a hardcoded magic number while the threshold is configurable, so the discount percentage cannot be tuned via `SETTINGS` and the two related knobs live in different places.
+FINDING: app/pricing.py | Pricing ignores the per-order `discount_percent` field defined on `models.Order` and in `schema.sql`, so a customer-specific discount stored in the database is silently never applied to the computed total.
+FINDING: app/pricing.py | Neither function validates its inputs: negative or zero `quantity`, negative `unit_cents`, or a negative `tax_rate` produce nonsensical negative totals instead of an error.
+FINDING: app/pricing.py | `tax_rate` is applied to the post-discount subtotal with no bounds check, so a caller passing a percentage (e.g. `8.5` meaning 8.5%) instead of a fraction silently multiplies the total by 9.5 with no error.
+FINDING: tests/test_pricing.py | There is no test coverage for `compute_total` at all, so the new `tax_rate` parameter, its rounding behavior, and the broken call in `app/orders.py` are not caught by the test suite.
+FINDING: app/pricing.py | The functions lack type annotations required by the project's Python style rules, leaving the cents-vs-float contract for `unit_cents` and the return type unspecified.

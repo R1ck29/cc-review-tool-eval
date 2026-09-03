@@ -1,0 +1,23 @@
+FINDING: app/db.py | `fetch_order_row` never wraps the query in try/finally (or `contextlib.closing`), so any exception from `cur.execute`/`fetchone` — e.g. `sqlite3.OperationalError` for a missing `orders` table or a locked database — leaks the connection and leaves the file handle/lock held until GC.
+
+FINDING: app/db.py | `connect()` passes `get("DB_PATH")` straight to `sqlite3.connect` with no validation, so a missing/unset config key yields `TypeError: argument 1 must be str... not None` (or a `KeyError` from `get`) rather than a clear configuration error.
+
+FINDING: app/db.py | `sqlite3.connect` silently creates an empty database file when `DB_PATH` points at a nonexistent or mistyped path, so a misconfigured deployment surfaces as confusing "no such table: orders" errors (and a stray file on disk) instead of failing fast; opening with a `file:...?mode=rw` URI and `uri=True` would fail loudly.
+
+FINDING: app/db.py | A brand-new connection is opened and torn down on every single `fetch_order_row` call with no pooling or reuse, which is a needless per-query cost on a hot read path and multiplies lock/handle churn under load.
+
+FINDING: app/db.py | No `timeout` is passed to `sqlite3.connect` and no WAL/journal mode is configured, so concurrent readers and writers fall back to the 5-second default busy timeout and will raise `sqlite3.OperationalError: database is locked` under contention.
+
+FINDING: app/db.py | The cursor is never explicitly closed; it is only reclaimed when `conn.close()` runs, which compounds the leak in the exception path above.
+
+FINDING: app/db.py | The function returns a bare positional tuple, so callers must hardcode index-to-column mapping — reordering or inserting a column in the `SELECT` list silently corrupts every caller instead of failing; setting `conn.row_factory = sqlite3.Row` would make access name-based.
+
+FINDING: app/db.py | `order_id` is passed through with no type coercion or validation, so a string id (e.g. from an HTTP path parameter) relies entirely on SQLite's column-affinity comparison rules to match an integer `id`, and silently returns `None` if the `id` column lacks INTEGER affinity or the string is non-numeric.
+
+FINDING: app/db.py | `connect()` is a public helper returning an unmanaged connection with no context-manager support, so every other caller in the codebase is invited to repeat the same leak-on-exception pattern.
+
+FINDING: app/db.py | The connection is created with the default `check_same_thread=True` and no documented threading contract, so any refactor that caches or hands off a connection across threads (common in a threaded web service) will raise `ProgrammingError` at runtime rather than at review time.
+
+FINDING: app/db.py | Errors are neither caught nor logged anywhere in the module, so operational failures (locked DB, missing schema, corrupt file) propagate as raw `sqlite3` exceptions with no context about which query or path failed.
+
+FINDING: app/db.py | `from app.config import get` imports an extremely generic name into module scope where a later `get(...)` call reads ambiguously; `config.get` or an aliased import would prevent accidental shadowing.

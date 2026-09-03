@@ -1,0 +1,29 @@
+Graph confirms one caller (`run_00` in `consumers/api_00/client_00.py:7`) and no importers of the new `format.py`/`audit.py` modules.
+
+**Findings:**
+
+FINDING: features/billing_00/core.py | `billing_total_00` added a third required positional parameter `rate_bps` with no default value, breaking backward compatibility for every existing caller.
+
+FINDING: consumers/api_00/client_00.py | `run_00` still calls `billing_total_00(amount_cents, quantity)` with only two arguments, so every invocation now raises `TypeError: billing_total_00() missing 1 required positional argument: 'rate_bps'`.
+
+FINDING: consumers/api_00/client_00.py | `run_00` was not updated to accept or thread through a `rate_bps` value, so there is no way for the API consumer to supply the per-contract rate the change was introduced for.
+
+FINDING: features/billing_00/core.py | `BASE_RATE = 100` is now dead — it is referenced nowhere in the module or repo, suggesting the intended default (`rate_bps=BASE_RATE` or `rate_bps` measured relative to `BASE_RATE`) was dropped and the rate semantics may be wrong.
+
+FINDING: features/billing_00/core.py | The total is computed in binary floating point (`amount_cents * quantity * (1 + rate_bps / 10000)`), so monetary results are subject to float rounding error (e.g. `100 * 1 * (1 + 815/10000)` yields 108.14999... and truncates to 108 instead of 109).
+
+FINDING: features/billing_00/core.py | `int(...)` truncates toward zero rather than rounding, silently dropping fractional cents and, for negative `amount_cents` (refunds/credits), rounding in the customer's favour instead of consistently — money math should use `round()`/`Decimal` with an explicit rounding mode.
+
+FINDING: features/billing_00/core.py | `rate_bps` is unvalidated: `None` raises `TypeError`, a string raises `TypeError` on division, and a negative value below -10000 silently produces a negative or sign-flipped total.
+
+FINDING: features/billing_00/core.py | The public signature change ships with no test coverage anywhere in the repo (no test files exist for `billing_total_00`), so the broken caller is not caught by any automated check.
+
+FINDING: features/billing_00/core.py | Function signature has no type annotations, violating the project's Python style rule requiring type annotations on all function signatures — particularly risky here since the new `rate_bps` unit (basis points vs. percent) is only documented in prose.
+
+FINDING: features/billing_00/format.py | The module is unreferenced — nothing in the repo imports `describe_format` or `normalise_format` from `features.billing_00.format`, so it is dead code added by this change.
+
+FINDING: features/billing_00/audit.py | The module is unreferenced — nothing imports `describe_audit` or `normalise_audit`, so it is dead code, and its two functions are byte-for-byte duplicates of `format.py`'s (and of ~20 other identical `format.py`/`audit.py` copies under `features/`) differing only in the literal prefix.
+
+FINDING: features/billing_00/format.py | `describe_format` interpolates the raw `value` rather than the normalised one, so `describe_format(" A ")` returns `"format= A "` while `normalise_format(" A ")` returns `"a"` — the two helpers disagree on the canonical representation of the same input.
+
+FINDING: features/billing_00/audit.py | `describe_audit` has the same raw-vs-normalised inconsistency as `describe_format`, and neither module has type annotations or tests.

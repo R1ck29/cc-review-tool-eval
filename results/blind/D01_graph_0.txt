@@ -1,0 +1,27 @@
+FINDING: app/pricing.py | Off-by-one in `apply_bulk_discount`: the docstring says the discount applies "when the order reaches BULK_THRESHOLD units" but the code uses `quantity > threshold` instead of `>=`, so an order of exactly 10 units gets no discount.
+
+FINDING: app/pricing.py | The existing test `test_bulk_discount_applies_at_threshold` fails against this code — `apply_bulk_discount(10, 100)` returns 1000, not the asserted 900 — so this change breaks the test suite.
+
+FINDING: app/pricing.py | `int(unit_cents * quantity * 0.9)` truncates toward zero rather than rounding, systematically under-charging by up to one cent per line (e.g. 11 units at 101 cents = 999.9 → 999 instead of 1000).
+
+FINDING: app/pricing.py | Binary floating-point representation error in the `* 0.9` product can push an exact result just below the integer boundary (e.g. a value that should be 630 computed as 629.9999999999999), and `int()` then silently drops a whole cent.
+
+FINDING: app/pricing.py | `compute_total` truncates a second time with `int(subtotal * (1 + tax_rate))`, so the discount truncation and the tax truncation compound into a larger downward bias on the final total.
+
+FINDING: app/pricing.py | For negative amounts (credits, refund lines) `int()` truncates toward zero, so rounding direction silently flips sign relative to charge lines, producing inconsistent money handling.
+
+FINDING: app/pricing.py | `apply_bulk_discount` returns inconsistent types — `int` on the discounted branch but the raw `unit_cents * quantity` product on the other, which stays a `float` if `unit_cents` is a float and then flows unrounded into `compute_total`.
+
+FINDING: app/pricing.py | The threshold cliff makes total price non-monotonic in quantity: at threshold 10 and 100 cents/unit, 10 units cost 1000 but 11 units cost only 990, so a customer pays less for more.
+
+FINDING: app/pricing.py | `get("BULK_THRESHOLD")` returns `None` when the key is absent (the config helper defaults to `None`), and `quantity > None` raises `TypeError` in Python 3 instead of falling back to a safe default.
+
+FINDING: app/pricing.py | The threshold value is read from an untyped config dict and compared directly against `quantity`; if it is ever supplied as a string (e.g. from an environment override) the comparison raises `TypeError`.
+
+FINDING: app/pricing.py | The 10% discount rate is hardcoded as the magic literal `0.9` while its companion threshold is configurable, so the two can never be tuned together.
+
+FINDING: app/pricing.py | Neither function validates its inputs — negative `quantity`, negative `unit_cents`, or a `tax_rate` expressed as a percentage (7 instead of 0.07) all silently produce nonsensical totals.
+
+FINDING: app/pricing.py | Monetary math is done in binary `float` rather than integer cents or `Decimal`, which is the root cause of the rounding and representation defects above.
+
+FINDING: tests/test_pricing.py | Test coverage is inadequate for the change: there are no cases for `compute_total`, for quantities just above/below the threshold, or for zero/negative inputs.

@@ -1,0 +1,33 @@
+## Review: `app/repository.py`
+
+Note: only `app/repository.py` was included in the message — the referenced context files (`app/db.py`, `app/config.py`, `app/models.py`) weren't actually attached, so findings about the config/db/model contracts are stated as risks based on the call sites visible here.
+
+FINDING: app/repository.py | The retry loop only re-runs on a falsy `row` (i.e. "order not found"), so genuine transient failures — which raise from `db.fetch_order_row` — propagate on the first attempt with no retry at all, defeating the stated purpose of `MAX_RETRIES`.
+
+FINDING: app/repository.py | Retrying a deterministic read with no intervening state change or new transaction means a legitimately missing order issues `MAX_RETRIES + 1` identical queries and still returns `None`, multiplying database load on every cache-miss/404 path.
+
+FINDING: app/repository.py | The retry loop has no sleep, backoff, or jitter between attempts, so it hammers the database in a tight loop the instant a row is absent.
+
+FINDING: app/repository.py | If `get("MAX_RETRIES")` returns `None` (key unset / no default configured), `get("MAX_RETRIES") + 1` raises `TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'` before any query is attempted.
+
+FINDING: app/repository.py | If config values are read from environment variables and returned as strings, `get("MAX_RETRIES") + 1` raises `TypeError` (or, worse, silently produces string concatenation semantics elsewhere); there is no `int()` coercion or type validation.
+
+FINDING: app/repository.py | A negative `MAX_RETRIES` (e.g. `-1`) makes `attempts` zero or negative, so `range(attempts)` is empty, the database is never queried, and the function silently returns `None` as if the order did not exist.
+
+FINDING: app/repository.py | Off-by-one risk: the code assumes `MAX_RETRIES` means "extra attempts beyond the first", but if the config key is intended as "maximum total attempts", every call performs one more query than configured.
+
+FINDING: app/repository.py | `Order(*row)` positionally unpacks the raw database row, so any column reordering, addition, or removal in the query silently constructs a mis-populated `Order` or raises `TypeError`, with no mapping by column name.
+
+FINDING: app/repository.py | If `db.fetch_order_row` returns a mapping (dict/`RealDictRow`) rather than a sequence, `Order(*row)` unpacks the column *names* as positional arguments, producing a corrupt `Order` object rather than an error at the point of the mistake.
+
+FINDING: app/repository.py | There is no exception handling around `db.fetch_order_row`, so driver-level errors (connection reset, timeout, deadlock) escape uncaught to the caller and are indistinguishable from programming errors.
+
+FINDING: app/repository.py | The function returns `None` for both "not found" and "exhausted all attempts", giving callers no way to distinguish a genuinely absent order from a repeated failed lookup, and it logs nothing on exhaustion.
+
+FINDING: app/repository.py | `get("MAX_RETRIES")` is re-read from config on every single call rather than resolved once, adding per-request lookup cost and allowing the retry count to change mid-flight if config is mutable.
+
+FINDING: app/repository.py | The docstring claims the function retries "per MAX_RETRIES", which misdescribes actual behavior (it retries only on empty results, never on errors), misleading future maintainers.
+
+FINDING: app/repository.py | `from app.config import get` binds the extremely generic name `get` at module scope, which is easily shadowed or confused with a local/builtin-style helper in future edits to this module.
+
+FINDING: app/repository.py | `get_order` has no type hints or declared return type (`Optional[Order]`), so callers get no static signal that `None` is a possible return value.

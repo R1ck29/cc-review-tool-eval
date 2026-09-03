@@ -1,0 +1,13 @@
+# 再生成可能・巨大（合計1.4GB）
+.venv/
+repos/
+__pycache__/
+*.pyc
+
+# ツールが生成するグラフDB
+.code-review-graph/
+*.db
+
+# macOS
+.DS_Store
+.serena/

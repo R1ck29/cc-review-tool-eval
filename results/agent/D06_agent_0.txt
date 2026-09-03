@@ -1,0 +1,19 @@
+I reviewed `app/repository.py` and traced its callers and dependencies.
+
+**FINDING: app/repository.py | The retry loop is ineffective: `db.fetch_order_row` returns `None` only when the order genuinely does not exist (DB errors propagate as exceptions, which the loop does not catch), so extra attempts just re-run the identical query and can never succeed.**
+
+FINDING: app/repository.py | `get("MAX_RETRIES") + 1` raises `TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'` if the `MAX_RETRIES` key is ever removed or set to `None`, because `config.get` returns `None` by default instead of a validated int.
+
+FINDING: app/repository.py | A negative or non-integer `MAX_RETRIES` value breaks the function: with `MAX_RETRIES = -1`, `range(0)` never iterates and `get_order` returns `None` without ever querying the database, silently reporting every order as missing.
+
+FINDING: app/repository.py | The loop retries with no sleep/backoff and `db.fetch_order_row` opens a fresh `sqlite3.connect` per attempt, so any `MAX_RETRIES > 0` produces a tight burst of identical connections/queries against the DB for every lookup of a missing order.
+
+FINDING: app/repository.py | `Order(*row)` positionally unpacks the raw SELECT result, so it silently depends on the column order and count in `db.fetch_order_row` (`id, customer_id, status, discount_pct, total_cents`); any reorder maps values into wrong fields with no error, and adding/removing a column raises `TypeError` at construction.
+
+FINDING: app/orders.py | `get_order_summary` uses `order.id` without checking the `None` that `repository.get_order` returns for a missing order, so a lookup of a nonexistent id raises `AttributeError: 'NoneType' object has no attribute 'id'` instead of a handled not-found result.
+
+FINDING: app/serializers.py | `order_to_dict` reads `order.discount`, but the `Order` model built by `get_order` has the field `discount_percent`, so serializing any order returned by the repository raises `AttributeError`.
+
+FINDING: app/db.py | `fetch_order_row` closes the connection only on the success path (no `try/finally` or context manager), so an exception during `cur.execute`/`fetchone` leaks the connection — amplified by the repository's retry loop, which reopens a connection per attempt.
+
+FINDING: tests/test_pricing.py | There is no test covering `repository.get_order` at all (the only test file exercises pricing), so neither the retry count semantics nor the `None`-row path in this change is verified.

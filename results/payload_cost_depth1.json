@@ -1,0 +1,116 @@
+{
+  "repo": "/private/tmp/claude-501/-Users-rick-Dropbox-python-projects-data-science-LLM-claude-code-cost-quality-eval-cc/c68179da-81d3-4008-a3ba-31c7baae3d3c/scratchpad/crg_src",
+  "depth": 1,
+  "max_results": 500,
+  "repo_files": 192,
+  "full_repo_tokens": 975419,
+  "mean_ctx_tokens": 45077,
+  "mean_payload_tokens": 84173.8,
+  "rows": [
+    {
+      "changed": "code_review_graph/parser.py",
+      "files": 40,
+      "ctx_tokens": 400142,
+      "payload_tokens": 844264,
+      "truncated": true
+    },
+    {
+      "changed": "code_review_graph/eval/benchmarks/impact_accuracy.py",
+      "files": 2,
+      "ctx_tokens": 6795,
+      "payload_tokens": 7270,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/skills.py",
+      "files": 3,
+      "ctx_tokens": 54183,
+      "payload_tokens": 132998,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/config_keys.py",
+      "files": 1,
+      "ctx_tokens": 309,
+      "payload_tokens": 996,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/custom_languages.py",
+      "files": 2,
+      "ctx_tokens": 7290,
+      "payload_tokens": 4855,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/embeddings.py",
+      "files": 6,
+      "ctx_tokens": 47040,
+      "payload_tokens": 127894,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/registry.py",
+      "files": 4,
+      "ctx_tokens": 28882,
+      "payload_tokens": 49085,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/constants.py",
+      "files": 2,
+      "ctx_tokens": 5659,
+      "payload_tokens": 2336,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/tools/registry_tools.py",
+      "files": 1,
+      "ctx_tokens": 1009,
+      "payload_tokens": 1020,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/event_resolver.py",
+      "files": 1,
+      "ctx_tokens": 1083,
+      "payload_tokens": 1204,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/analysis.py",
+      "files": 1,
+      "ctx_tokens": 3312,
+      "payload_tokens": 2780,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/communities.py",
+      "files": 9,
+      "ctx_tokens": 83722,
+      "payload_tokens": 61049,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/tools/refactor_tools.py",
+      "files": 1,
+      "ctx_tokens": 1423,
+      "payload_tokens": 1018,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/eval/token_benchmark.py",
+      "files": 2,
+      "ctx_tokens": 12557,
+      "payload_tokens": 11548,
+      "truncated": false
+    },
+    {
+      "changed": "code_review_graph/cli.py",
+      "files": 3,
+      "ctx_tokens": 22749,
+      "payload_tokens": 14290,
+      "truncated": false
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+## Review of `app/db.py` (with context)
+
+**FINDING: app/db.py | The SELECT queries a column named `discount_pct`, but `schema.sql` defines the column as `discount_percent`, so every call to `fetch_order_row` raises `sqlite3.OperationalError: no such column: discount_pct`.**
+
+FINDING: app/db.py | `cur.execute` / `fetchone` are not wrapped in try/finally or a context manager, so any exception (including the guaranteed `no such column` error above) leaks the connection without ever calling `conn.close()`.
+
+FINDING: app/db.py | `fetch_order_row` opens and tears down a brand-new connection on every single call, which under the retry loop in `repository.get_order` multiplies connection setup cost with no pooling or reuse.
+
+FINDING: app/db.py | The function returns a bare positional tuple, silently coupling `repository.get_order`'s `Order(*row)` to the exact column order in this SELECT — reordering the select list corrupts every field with no error.
+
+FINDING: app/db.py | `connect()` passes `get("DB_PATH")` unchecked; if the key is ever absent `get` returns `None` and `sqlite3.connect(None)` raises an opaque `TypeError` instead of a clear configuration error.
+
+FINDING: app/db.py | Nothing ever applies `schema.sql`, and `sqlite3.connect` silently creates an empty database file when `orders.db` is missing, so a misconfigured `DB_PATH` surfaces as `no such table: orders` rather than a missing-file error.
+
+FINDING: app/db.py | `connect()` uses default sqlite3 settings with no `timeout`, `row_factory`, or `check_same_thread` handling, so concurrent access yields immediate `database is locked` errors and connections cannot be safely shared across threads.
+
+FINDING: app/pricing.py | `apply_bulk_discount` uses `quantity > threshold` while the docstring says the discount applies "when the order reaches BULK_THRESHOLD units", an off-by-one that makes the existing test `test_bulk_discount_applies_at_threshold` fail (10 × 100 returns 1000, not 900).
+
+FINDING: app/pricing.py | `compute_total` requires a `tax_rate` argument that has no default, but `orders.create_order` calls it with only two arguments, so every order creation raises `TypeError`.
+
+FINDING: app/serializers.py | `order_to_dict` reads `order.discount`, but the `Order` dataclass field is named `discount_percent`, so serializing any order raises `AttributeError`.
+
+FINDING: app/events.py | `publish_order_created` publishes to `DEFAULT_TOPIC` (`"order.created"`, dot-separated) while `handlers.py` subscribes to `"order_created"` (underscore), so the handler is never invoked and events are silently dropped.
+
+FINDING: app/repository.py | `get_order` "retries" a purely deterministic read with no delay and no exception handling, so the loop can never produce a different result and only masks the real failure mode (`db.fetch_order_row` raising).
+
+FINDING: app/repository.py | `get("MAX_RETRIES") + 1` raises `TypeError` if the key is ever removed from `SETTINGS`, since `get` returns `None` by default.
+
+FINDING: app/orders.py | `get_order_summary` dereferences `order.id` without checking for `None`, so a missing order id produces `AttributeError: 'NoneType' object has no attribute 'id'` instead of a not-found result.
+
+FINDING: app/orders.py | `_normalise` assigns to a local variable named `STATUS_OPEN`, shadowing the module-level constant and strongly implying an intent to mutate it that the code does not (and cannot) achieve.
+
+FINDING: app/orders.py | `create_order` never persists the order or assigns an `id`, and never publishes the `order.created` event, so the returned dict cannot be round-tripped through `repository.get_order` or `serializers.order_to_dict`.
+
+FINDING: app/utils.py | `parse_money` truncates instead of rounding after a binary float multiply, so `parse_money("12.34")` returns 1233 and `parse_money("0.29")` returns 28 — off-by-one-cent errors on common inputs.
+
+FINDING: app/utils.py | `clamp` silently returns `low` when callers pass an inverted range (`low > high`) rather than rejecting the invalid bounds.
+
+FINDING: app/api.py | The `create` route indexes `payload["customerId"]`, `payload["quantity"]`, and `payload["unit_cents"]` with no validation, so a missing or malformed field raises an unhandled `KeyError` (and the camelCase/snake_case mix invites caller mistakes).
+
+FINDING: app/tasks.py | `run_task` does `getattr(handlers, prefix + name)` on caller-supplied `name`, which can resolve to any module attribute matching the prefix and does not verify the result is callable before invoking it.
+
+FINDING: schema.sql | `orders.customer_id` has no index despite being the natural lookup/foreign key, and no `FOREIGN KEY` constraint or `CHECK` on `status` exists to keep rows consistent with the domain model.

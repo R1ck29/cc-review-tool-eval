@@ -1,0 +1,15 @@
+I used the graph first (impact radius on `app/db.py`, then `callers_of` for `connect` and `fetch_order_row`), then read the changed file, its callers, and the schema.
+
+**Blast radius:** `app/db.py::fetch_order_row` → `app/repository.py::get_order` → `app/orders.py::get_order_summary`; `app/db.py::connect` → `app/config.py::get`.
+
+The central problem is that the SELECT in `fetch_order_row` names a column that does not exist in `schema.sql`, so the whole read path fails at runtime.
+
+FINDING: app/db.py | The SELECT lists `discount_pct` but `schema.sql` defines the column as `discount_percent`, so every call to `fetch_order_row` raises `sqlite3.OperationalError: no such column: discount_pct`.
+FINDING: app/repository.py | `get_order` calls `fetch_order_row`, which now always raises on the bad column name, so loading any order propagates an `OperationalError` instead of returning an `Order` or `None`.
+FINDING: app/orders.py | `get_order_summary` inherits the `OperationalError` from the broken query, and even once the column name is fixed it dereferences `order.id` without a `None` check, crashing with `AttributeError` when the order does not exist.
+FINDING: app/db.py | `conn.close()` is only reached on the success path — if `cur.execute()` or `fetchone()` raises (which the wrong column name guarantees), the connection is never closed, leaking a sqlite connection on every call.
+FINDING: app/db.py | `connect()` passes `get("DB_PATH")` straight to `sqlite3.connect` with no validation; if the key is missing `config.get` returns `None` and the failure surfaces as an opaque `TypeError` rather than a configuration error.
+FINDING: app/db.py | `fetch_order_row` opens a brand-new connection per call with no reuse or pooling, and `repository.get_order`'s retry loop multiplies that by `MAX_RETRIES + 1` connections per lookup.
+FINDING: app/db.py | The function returns a bare tuple whose contract is purely positional and is expanded by `Order(*row)` in `repository.py`, so any future reordering or extension of the SELECT column list silently mis-maps fields instead of failing loudly (e.g. `discount_percent` and `total_cents` swapping).
+FINDING: app/repository.py | The retry loop re-runs `fetch_order_row` when it returns `None`, but `None` documents "no such order" (a deterministic result), and exceptions — the actual transient failure mode — are not caught, so `MAX_RETRIES` adds cost without adding resilience.
+FINDING: app/serializers.py | `order_to_dict` reads `order.discount`, but the `Order` dataclass populated from this query's row has the field `discount_percent`, so serializing any order fetched through `db.fetch_order_row` raises `AttributeError`.

@@ -1,0 +1,23 @@
+FINDING: app/utils.py | `parse_money` uses binary floating point, so `int(float("12.34") * 100)` truncates to 1233 instead of 1234 (also "1.15" → 114, "8.35" → 834); money parsing should use `Decimal(raw)` or at minimum `round()`.
+
+FINDING: app/utils.py | `parse_money` truncates toward zero rather than rounding, so sub-cent input like "12.345" silently becomes 1234 with no error or documented rounding policy.
+
+FINDING: app/utils.py | `parse_money`'s truncation is asymmetric for negative amounts (refunds/credits): "-12.345" → -1234 rounds *up* in magnitude terms while positive values round down, producing inconsistent, non-reconciling totals.
+
+FINDING: app/utils.py | `parse_money` performs no input validation or error handling — `None`, `""`, `"$12.34"`, or `"12,34"` raise raw `ValueError`/`TypeError` out of a "parse" helper instead of a meaningful error or documented contract.
+
+FINDING: app/utils.py | `parse_money` accepts non-monetary float syntax that callers almost certainly don't intend, including `"1e5"` (→ 10000000 cents), `"inf"` (raises `OverflowError` from `int()`), and `"nan"` (raises `ValueError`), all of which escape as unhandled exception types.
+
+FINDING: app/utils.py | `clamp` silently produces an out-of-range result when the bounds are inverted (`clamp(7, low=10, high=5)` returns 10, which is greater than `high`) instead of rejecting `low > high`.
+
+FINDING: app/utils.py | `clamp` handles NaN inconsistently and silently: `clamp(float("nan"), 0, 10)` returns 10, while `clamp(5, float("nan"), 10)` returns `nan`, so NaN can either vanish or propagate depending on argument position.
+
+FINDING: app/utils.py | `clamp` has no docstring, no type hints, and no stated contract, unlike `parse_money` in the same module — the argument order (`value, low, high`) is easy to invoke wrongly and wrong order fails silently rather than raising.
+
+FINDING: app/pricing.py | `apply_bulk_discount` uses `quantity > threshold` while the docstring says the discount applies when the order "reaches" `BULK_THRESHOLD` — an off-by-one that denies the discount at exactly the threshold quantity (should be `>=`).
+
+FINDING: app/pricing.py | `apply_bulk_discount` returns an `int` on the discounted path but returns `unit_cents * quantity` unconverted otherwise, so the return type/precision depends on the branch when `unit_cents` is a float.
+
+FINDING: app/pricing.py | `int(unit_cents * quantity * 0.9)` and `int(subtotal * (1 + tax_rate))` truncate rather than round, so every order line loses up to one cent and the loss compounds across lines; combined with float `0.9`/`tax_rate` this repeats the same class of bug as `parse_money`.
+
+FINDING: app/pricing.py | `get("BULK_THRESHOLD")` has no default or validation, so a missing/`None` config value makes `quantity > threshold` raise `TypeError` at request time rather than failing at startup.

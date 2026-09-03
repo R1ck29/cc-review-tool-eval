@@ -1,0 +1,11 @@
+Graph confirmed the blast radius: `app/serializers.py` → `order_to_dict` (0 callers in-graph), importing `Order` from `app/models.py`, with `app/repository.py` as the constructor of those `Order` instances. I read those plus `db.py` and `schema.sql`.
+
+The core defect: the serializer reads `order.discount`, but the `Order` dataclass (`app/models.py:10`) defines the field as `discount_percent`. There is no `discount` attribute anywhere — not in the model, not in the schema.
+
+FINDING: app/serializers.py | `order.discount` raises AttributeError on every call because the `Order` dataclass (app/models.py:10) defines the field as `discount_percent`, not `discount`, so `order_to_dict` fails for all valid orders.
+FINDING: app/serializers.py | Even if the attribute were corrected, the emitted wire key was changed from the model/schema name `discount_percent` to `discount`, silently breaking any external API consumer that reads the `discount_percent` key.
+FINDING: app/serializers.py | The key name `discount` is unit-ambiguous next to `total_cents` — a client can reasonably read it as a currency amount rather than a percentage, leading to wrong discount math downstream.
+FINDING: app/serializers.py | `order_to_dict` has no guard for `order is None`, yet its only realistic data source `repository.get_order` (app/repository.py:14) returns `None` on a miss, so a missing order produces an opaque AttributeError instead of a handled null response.
+FINDING: app/serializers.py | `order_to_dict(order: Order)` is missing a return type annotation (e.g. `-> dict`), so type checkers cannot flag the `order.discount` attribute error at review time — an annotated signature plus mypy/pyright would have caught this defect before merge.
+FINDING: app/serializers.py | There is no test anywhere covering `order_to_dict` (tests/ contains only test_pricing.py), which is why an attribute name that matches no field in the codebase reached review.
+FINDING: app/db.py | `fetch_order_row` selects `discount_pct` while schema.sql:5 declares the column as `discount_percent`, so the query raises `sqlite3.OperationalError: no such column` — the same field-naming inconsistency as the serializer bug, and it means `order_to_dict` can never receive a populated `Order` at runtime.

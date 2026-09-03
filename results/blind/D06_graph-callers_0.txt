@@ -1,0 +1,47 @@
+FINDING: app/repository.py | The retry loop re-runs `db.fetch_order_row` only when it returns `None`, which per that function's own docstring means "no such order" — a deterministic result, so the retry can never change the outcome and just repeats an identical query.
+
+FINDING: app/repository.py | The actual transient failure mode (e.g. `sqlite3.OperationalError` from a locked/unavailable DB) is raised inside `db.fetch_order_row` and is not caught, so the function documented as "retrying per MAX_RETRIES" never retries the errors retries exist for.
+
+FINDING: app/repository.py | `get("MAX_RETRIES") + 1` raises `TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'` if the key is ever removed/renamed in `SETTINGS`, since `config.get` returns `None` for unknown keys.
+
+FINDING: app/repository.py | With the shipped config value `MAX_RETRIES: 0`, `attempts` is 1, so the entire retry mechanism is dead code in production and is never exercised by any real run.
+
+FINDING: app/repository.py | The retry loop has no sleep/backoff, so if `MAX_RETRIES` is ever raised it will hammer the database with back-to-back identical queries in a tight loop.
+
+FINDING: app/repository.py | `Order(*row)` binds columns purely by position, so any change to the column order in `db.fetch_order_row`'s SELECT silently mis-assigns fields (e.g. `status` receiving `discount_pct`) with no error.
+
+FINDING: app/repository.py | `get_order` returns `None` for a missing order while callers such as `orders.get_order_summary` immediately dereference the result, converting a not-found case into an opaque `AttributeError: 'NoneType' object has no attribute 'id'`.
+
+FINDING: app/orders.py | `create_order` calls `pricing.compute_total(quantity, unit_cents)` with two arguments but `compute_total` requires three (`tax_rate` has no default), so every call to the `/orders` route raises `TypeError`.
+
+FINDING: app/serializers.py | `order_to_dict` reads `order.discount`, but the `Order` dataclass field is named `discount_percent`, so serializing any order raises `AttributeError`.
+
+FINDING: app/handlers.py | The handler subscribes to topic `"order_created"` while `events.publish_order_created` publishes to `config.DEFAULT_TOPIC` = `"order.created"`, so `on_order_created` is never invoked.
+
+FINDING: app/pricing.py | `apply_bulk_discount` uses `quantity > threshold` although the docstring says the discount applies when the order "reaches BULK_THRESHOLD units" — an off-by-one that denies the discount at exactly 10 units.
+
+FINDING: app/db.py | `conn` is only closed on the success path; if `cursor()`, `execute()`, or `fetchone()` raises, the sqlite connection is leaked (no `try/finally` or context manager).
+
+FINDING: app/orders.py | `create_order` never writes anything to the database and returns a dict with no `id`, so the created order can never subsequently be loaded by `repository.get_order`.
+
+FINDING: app/orders.py | `_normalise` assigns to a local named `STATUS_OPEN`, shadowing the module-level constant and giving the misleading impression it mutates it; the function is also unused dead code.
+
+FINDING: app/tasks.py | `getattr(handlers, prefix + name, None)` resolves against the entire `handlers` module namespace using a caller-supplied name, so any module attribute matching the prefix (or an injected/shadowed import) becomes remotely invocable with unvalidated dispatch.
+
+FINDING: app/tasks.py | Task names taken from topic strings containing dots (e.g. `"order.created"`) can never resolve, since `on_order.created` is not a valid attribute name and always raises `LookupError`.
+
+FINDING: app/events.py | `publish` has no exception isolation, so one failing subscriber aborts the loop and silently prevents all later subscribers from receiving the event.
+
+FINDING: app/events.py | `publish_order_created` is never called anywhere in the codebase (notably not by `api.create`), so the entire pub/sub path is unreachable in practice.
+
+FINDING: app/api.py | `payload["customerId"]`, `payload["quantity"]`, and `payload["unit_cents"]` are unvalidated dict lookups, so any malformed request raises an unhandled `KeyError`; the keys are also inconsistently camelCase and snake_case.
+
+FINDING: app/api.py | The route returns the raw service dict rather than passing it through `serializers.order_to_dict`, bypassing the wire format entirely.
+
+FINDING: app/models.py | The same field carries three different names across layers — `discount_pct` (SQL), `discount_percent` (model), `discount` (serializer) — which is the direct cause of the serializer's `AttributeError` and invites further mismatches.
+
+FINDING: app/config.py | `config.get` silently returns `None` for unknown keys with no validation or required-key concept, so configuration typos surface as `TypeError` deep in unrelated call stacks (`MAX_RETRIES + 1`, `quantity > threshold`).
+
+FINDING: app/pricing.py | `int(subtotal * (1 + tax_rate))` and `int(unit_cents * quantity * 0.9)` truncate toward zero rather than rounding, systematically undercharging by up to a cent per line.
+
+FINDING: app/db.py | A new sqlite connection is opened and torn down on every single row fetch, with no pooling or reuse, which is needlessly expensive under load.

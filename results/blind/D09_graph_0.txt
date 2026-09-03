@@ -1,0 +1,33 @@
+Reviewed `app/events.py` against the surrounding modules. Findings:
+
+FINDING: app/events.py | `publish` iterates the live subscriber list, so any handler that calls `subscribe` (or otherwise mutates `_SUBSCRIBERS[topic]`) during dispatch skips handlers or loops indefinitely — it should iterate over a snapshot such as `list(_SUBSCRIBERS.get(topic, []))`.
+
+FINDING: app/events.py | No exception isolation in `publish`: the first handler that raises aborts delivery to all remaining subscribers and propagates the error into the unrelated publishing caller, leaving the event partially delivered with no record of which handlers ran.
+
+FINDING: app/events.py | `publish_order_created` resolves the topic from mutable config at call time (`get("DEFAULT_TOPIC")`), so it silently stops matching any subscriber registered with the literal `"order.created"` if `SETTINGS["DEFAULT_TOPIC"]` is ever changed or overridden at runtime.
+
+FINDING: app/events.py | If `DEFAULT_TOPIC` is missing from `SETTINGS`, `config.get` returns `None` and `publish(None, payload)` becomes a silent no-op — a misconfiguration drops order-created events with no error.
+
+FINDING: app/events.py | `publish` silently swallows delivery to unknown/misspelled topics (`_SUBSCRIBERS.get(topic, [])`) and returns nothing, so callers cannot distinguish "delivered to N handlers" from "topic typo, delivered to nobody".
+
+FINDING: app/events.py | There is no `unsubscribe`/`clear` API, so subscribers can never be removed: handlers bound to short-lived objects keep them alive (leak), and test suites leak registrations across tests because `_SUBSCRIBERS` is module-global state.
+
+FINDING: app/events.py | `subscribe` does not deduplicate, so registering the same callable twice (e.g. a module imported/initialized twice, or a re-run setup hook) causes the handler to be invoked twice per event — a correctness problem for non-idempotent handlers like order side effects.
+
+FINDING: app/events.py | The global `_SUBSCRIBERS` dict is mutated without any lock, so concurrent `subscribe`/`publish` from multiple threads (typical for a service) can race on `setdefault` + `append` and observe partially-updated subscriber lists.
+
+FINDING: app/events.py | Dispatch is fully synchronous and in-process, so a slow or blocking handler stalls the publishing request path and one handler's latency is charged to the caller of `publish_order_created`.
+
+FINDING: app/events.py | Topics are unvalidated free-form strings (no constant/enum, no type check), so a non-hashable topic raises `TypeError` deep inside `publish`, and typos in either `subscribe` or `publish` fail silently rather than at registration time.
+
+FINDING: app/events.py | `publish`/`publish_order_created` return `None` and there is no callable check in `subscribe`, so a non-callable registered by mistake only fails much later at publish time, inside an unrelated caller's stack.
+
+Context files (not under review, but defects observed):
+
+FINDING: app/pricing.py | `apply_bulk_discount` uses `quantity > threshold` while its docstring says the discount applies when the order *reaches* `BULK_THRESHOLD` — an off-by-one that denies the discount at exactly 10 units.
+
+FINDING: app/repository.py | With `MAX_RETRIES = 0` the loop runs exactly once, and even when configured higher it retries a deterministic "row not found" read with no backoff, so the retry logic is either dead or a pointless hot loop.
+
+FINDING: app/db.py | `fetch_order_row` does not use `try/finally` (or a context manager), so any exception from `execute`/`fetchone` leaks the sqlite connection.
+
+FINDING: app/tasks.py | `run_task` does unchecked `getattr(handlers, "on_" + name)` on caller-supplied `name`, so it can reach any module attribute starting with `on_` (including non-callables or re-exported imports) and then fails with a raw `TypeError` instead of a controlled error.

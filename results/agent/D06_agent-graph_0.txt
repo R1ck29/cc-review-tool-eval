@@ -1,0 +1,14 @@
+I used the graph (impact radius on `app/repository.py`, `callers_of` on `get_order`) and then read the change and its blast radius (`orders.py`, `db.py`, `config.py`, `models.py`, `serializers.py`).
+
+**What the change does:** `get_order` now wraps the row fetch in a retry loop driven by `get("MAX_RETRIES")`, and returns `None` when no row is found.
+
+FINDING: app/repository.py | With `MAX_RETRIES` set to `0` in `app/config.py`, `attempts` is 1 and the loop never actually retries, so the advertised retry behavior is dead code in the shipped configuration.
+FINDING: app/repository.py | The loop only retries when `row` is falsy — a missing order is a deterministic result, so retrying re-runs the identical query N+1 times and can never succeed, while genuinely transient failures (`sqlite3` errors raised inside `db.fetch_order_row`) propagate on the first attempt and are never retried.
+FINDING: app/repository.py | `get("MAX_RETRIES")` uses `app.config.get`'s implicit `default=None`, so if the key is ever removed or renamed the function raises `TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'` instead of falling back to a sane attempt count.
+FINDING: app/repository.py | A negative or non-integer `MAX_RETRIES` (e.g. `-1`) makes `range(attempts)` empty, so `get_order` silently returns `None` without ever querying the database, masking a config error as "order not found".
+FINDING: app/repository.py | There is no sleep/backoff between attempts, so a raised `MAX_RETRIES` turns the function into a tight loop that hammers the database with back-to-back identical queries.
+FINDING: app/repository.py | Each attempt calls `db.fetch_order_row`, which opens and closes a fresh `sqlite3` connection via `db.connect()`, so the retry multiplies connection setup/teardown cost per lookup rather than reusing one connection.
+FINDING: app/repository.py | `get_order` returns `None` on a miss but the only caller, `get_order_summary` in `app/orders.py:13-14`, dereferences `order.id` without a `None` check, so a lookup for a nonexistent order raises `AttributeError: 'NoneType' object has no attribute 'id'`.
+FINDING: app/repository.py | `Order(*row)` positionally unpacks the SELECT list from `db.fetch_order_row`, so any change to that column list (order, added, or removed columns) silently mis-assigns fields or raises `TypeError` rather than failing at the query.
+FINDING: app/serializers.py | `order_to_dict` reads `order.discount`, but the `Order` dataclass built by `get_order` defines the field as `discount_percent`, so serializing any order returned by this repository raises `AttributeError`.
+FINDING: app/repository.py | Retry attempts are not logged or surfaced, so repeated failed lookups are indistinguishable from a single miss when debugging.

@@ -1,0 +1,35 @@
+Reviewed `app/db.py` against the surrounding modules. Findings:
+
+FINDING: app/db.py | `fetch_order_row` has no `try/finally` (or `with` block), so any exception from `cur.execute`/`fetchone` (e.g. `sqlite3.OperationalError` for a missing `orders` table or a locked DB) skips `conn.close()` and leaks the connection/file handle on every failed call.
+
+FINDING: app/db.py | The docstring promises "None if there is no such order", but DB-level failures raise instead of returning None, and `repository.get_order` neither catches exceptions nor distinguishes them — so its retry loop can never actually retry the transient failures it exists for.
+
+FINDING: app/db.py | The function returns a bare positional tuple whose column order is implicitly contracted with `Order(*row)` in `app/repository.py`; adding, removing, or reordering a column in the SELECT silently misassigns model fields with no error, and the `Order` signature isn't verifiable from this layer.
+
+FINDING: app/db.py | `connect()` passes `get("DB_PATH")` straight to `sqlite3.connect` with no validation: a missing/None key raises an opaque `TypeError` deep in the driver instead of a clear configuration error.
+
+FINDING: app/db.py | `"orders.db"` is a relative path resolved against the process CWD, and `sqlite3.connect` silently creates an empty database file when it is wrong — turning a deployment/config mistake into confusing "no such table: orders" errors at query time rather than a startup failure.
+
+FINDING: app/db.py | A brand-new connection is opened and torn down on every single `fetch_order_row` call with no pooling or reuse, which is multiplied by the retry loop in `repository.get_order` and is a significant per-lookup cost.
+
+FINDING: app/db.py | The cursor is never closed (only the connection is), leaving cleanup to GC and diverging from the explicit-close style used for `conn`.
+
+FINDING: app/db.py | No `timeout`, `isolation_level`, or `row_factory` is configured, so concurrent writers surface as `database is locked` after the default 5s and callers are forced into positional-index access.
+
+FINDING: app/db.py | The query has no `LIMIT 1` and silently ignores extra rows if `orders.id` is not actually constrained unique in the schema.
+
+FINDING: app/repository.py | `MAX_RETRIES = 0` in config makes `attempts = 1`, so the documented retry behavior is dead code; additionally the loop only re-attempts when the row is legitimately absent (a deterministic result that will never change) and has no backoff between attempts.
+
+FINDING: app/repository.py | `get("MAX_RETRIES") + 1` raises `TypeError` if the key is ever absent, since `config.get` returns `None` by default.
+
+FINDING: app/pricing.py | `if quantity > threshold` contradicts the docstring "when the order reaches BULK_THRESHOLD units" — at exactly 10 units no discount is applied (off-by-one; should be `>=`).
+
+FINDING: app/pricing.py | Monetary math uses float multiplication with `int()` truncation toward zero in both `apply_bulk_discount` and `compute_total`, systematically under-charging by up to a cent per operation and compounding across the two stages.
+
+FINDING: app/pricing.py | `discount_pct` is selected from the DB and carried on the order, but `compute_total` never applies it — only the bulk discount is used, so per-order discounts are silently dropped.
+
+FINDING: app/events.py | `publish` iterates the live subscriber list, so a handler that calls `subscribe` on the same topic mutates the list mid-iteration and gets invoked within the same publish cycle (potentially unbounded).
+
+FINDING: app/events.py | `publish` has no exception isolation — one raising subscriber aborts the loop and silently starves every remaining subscriber for that topic.
+
+FINDING: app/config.py | `SETTINGS` is returned by reference from a mutable module-level dict, so any caller mutating a returned container (or the dict itself) corrupts global configuration for the whole process.

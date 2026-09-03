@@ -1,0 +1,19 @@
+FINDING: app/events.py | `publish` iterates the live subscriber list (`_SUBSCRIBERS.get(topic, [])`), so a handler that calls `subscribe()` for the same topic during dispatch mutates the list mid-iteration — the new handler receives the in-flight payload and a self-resubscribing handler loops forever; iterate over a copy (`list(...)`) instead.
+
+FINDING: app/events.py | `publish` has no exception isolation: if any subscriber raises, the remaining subscribers for that topic are never invoked and the exception propagates into the unrelated publisher's call stack.
+
+FINDING: app/events.py | `publish_order_created` resolves its topic from `get("DEFAULT_TOPIC")`, so if the key is missing/unset and `get` returns `None` (or any value that doesn't match what callers passed to `subscribe`), the event is silently dropped with no error or log — an unroutable publish is indistinguishable from a topic with zero subscribers.
+
+FINDING: app/events.py | Routing an order-created event to a generic `DEFAULT_TOPIC` means every other event published to the default topic shares subscribers, so order-created handlers receive unrelated payloads and vice versa; a dedicated constant topic (e.g. `"order.created"`) is almost certainly intended.
+
+FINDING: app/events.py | The topic is looked up from config at publish time rather than resolved once, so any runtime config reload/mutation of `DEFAULT_TOPIC` silently orphans all subscribers registered under the previous value.
+
+FINDING: app/events.py | If `app.config.get` raises (e.g. `KeyError`) for an unconfigured `DEFAULT_TOPIC` instead of returning a default, `publish_order_created` fails at call time rather than at startup — there is no validation or fallback for a missing key.
+
+FINDING: app/events.py | Module-level mutable `_SUBSCRIBERS` is accessed without any lock, so concurrent `subscribe`/`publish` from multiple threads can race (a `setdefault` list created by one thread being appended to while another iterates it), and there is no way to reset state between tests.
+
+FINDING: app/events.py | There is no `unsubscribe` and no duplicate detection, so registering the same callback twice (e.g. on module re-import or repeated setup in tests) delivers each payload to it multiple times and handlers can never be removed, leaking references to their closures/objects.
+
+FINDING: app/events.py | `publish` returns nothing and gives callers no delivery signal (count of handlers invoked, or an error on unknown topic), making typo'd/never-subscribed topics fail silently.
+
+FINDING: app/events.py | Neither `subscribe` nor `publish` validates that `topic` is a string despite the module docstring's "String-keyed" contract, so a non-string topic from config (int, `None`) silently creates a separate, unreachable bucket rather than failing loudly.

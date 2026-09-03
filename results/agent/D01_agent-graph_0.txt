@@ -1,0 +1,18 @@
+I used the graph's impact radius and `callers_of` on both changed symbols, then verified each caller by reading the source.
+
+**Verification of the two hard failures:**
+- `app/orders.py:8` calls `pricing.compute_total(quantity, unit_cents)` — 2 args against the new 3-parameter signature (`tax_rate` has no default) → `TypeError` on every order creation, reachable from `api.create` (`POST /orders`).
+- `tests/test_pricing.py:5` asserts `apply_bulk_discount(10, 100) == 900`, but with `BULK_THRESHOLD = 10` (`app/config.py:6`) the strict `>` makes `10 > 10` false, returning `1000`. The test fails, and the test name plus the docstring ("reaches BULK_THRESHOLD units") both say the discount should apply *at* the threshold.
+
+FINDING: app/orders.py | `create_order` calls `pricing.compute_total(quantity, unit_cents)` with only two arguments, but `compute_total` now requires a third `tax_rate` parameter with no default, so every call raises `TypeError: compute_total() missing 1 required positional argument: 'tax_rate'`.
+FINDING: app/api.py | The `/orders` route handler `create` reaches the broken two-argument `compute_total` call via `orders.create_order`, so order creation over HTTP fails with a 500-level error for all requests.
+FINDING: app/pricing.py | `apply_bulk_discount` uses a strict `quantity > threshold`, so an order exactly at `BULK_THRESHOLD` (10) gets no discount, contradicting its own docstring ("when the order reaches BULK_THRESHOLD units"); it should be `>=`.
+FINDING: tests/test_pricing.py | `test_bulk_discount_applies_at_threshold` fails with the new comparison — `apply_bulk_discount(10, 100)` returns `1000` instead of the asserted `900`, confirming the off-by-one is a behavioral regression.
+FINDING: app/pricing.py | `compute_total` takes a `tax_rate` argument but no caller, config key, or default supplies one (`app/config.py` has no tax setting), so the new parameter is unsourced and callers cannot be fixed without inventing a value.
+FINDING: app/pricing.py | `int(unit_cents * quantity * 0.9)` truncates toward zero rather than rounding, systematically under-charging by up to one cent per line (e.g. `apply_bulk_discount(11, 101)` gives `999` instead of `999.9 → 1000`), and float multiplication makes the result sensitive to binary rounding.
+FINDING: app/pricing.py | `int(subtotal * (1 + tax_rate))` truncates the tax amount instead of rounding, compounding the discount truncation and losing revenue on every taxed order.
+FINDING: app/pricing.py | `apply_bulk_discount` returns an `int` on the discount path but `unit_cents * quantity` unconverted on the other path, so a float `unit_cents` yields a float subtotal and an inconsistent return type across branches.
+FINDING: app/pricing.py | `get("BULK_THRESHOLD")` is called without a default, so if the config key is ever absent or renamed, `threshold` becomes `None` and `quantity > None` raises `TypeError: '>' not supported between instances of 'int' and 'NoneType'` rather than falling back safely.
+FINDING: app/pricing.py | Neither function validates its inputs, so a negative `quantity`, negative `unit_cents`, or a `tax_rate` supplied as a percentage (e.g. `8.5` meaning 8.5%) silently produces a wildly wrong total instead of an error.
+FINDING: app/pricing.py | `tax_rate` is applied to the post-discount subtotal with no documented convention (fraction vs. percent) and no test covering `compute_total` at all, so the new tax behavior is entirely unverified.
+FINDING: tests/test_pricing.py | There is no test for `compute_total`, the function whose signature changed, so the caller-breaking `TypeError` in `app/orders.py` is not caught by the suite.

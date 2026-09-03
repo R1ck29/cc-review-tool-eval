@@ -1,0 +1,25 @@
+Reviewed `app/models.py`. Note: only `app/models.py` was actually included — the referenced context files were not supplied, so I could not verify cross-module expectations (e.g. which `status` values other code compares against, or which `Customer` fields callers read). Findings below are based on the model definitions alone.
+
+FINDING: app/models.py | `discount_percent: float` has ambiguous units with no documentation or validation — a caller passing `0.2` for "20%" and a caller passing `20` will both be accepted, silently producing a 100x discount error in whichever consumer disagrees.
+
+FINDING: app/models.py | Using a binary `float` for a monetary discount applied to integer `total_cents` invites rounding/representation errors (e.g. `int(1000 * 0.1)` style truncation, or `0.29 * 100` artifacts); a `Decimal` or integer basis-points field would be correct for money math.
+
+FINDING: app/models.py | There is no `__post_init__` validation, so `discount_percent` can be negative or greater than 100, yielding negative or inflated order totals downstream.
+
+FINDING: app/models.py | `discount_percent` accepts `float('nan')` and `float('inf')`, which propagate silently through any total calculation and can produce NaN totals that also break comparisons and equality checks.
+
+FINDING: app/models.py | `status: str` is an unconstrained free-form string rather than an `Enum` or `Literal`, so typos and case mismatches (`"shipped"` vs `"SHIPPED"` vs `"Shipped"`) construct successfully and then silently fail every status comparison.
+
+FINDING: app/models.py | `total_cents: int` is unvalidated and may be negative, and there is no currency field, so amounts in different currencies are indistinguishable and can be summed or compared incorrectly.
+
+FINDING: app/models.py | Both dataclasses use the default `eq=True, frozen=False`, which sets `__hash__ = None`, so `Order` and `Customer` instances cannot be placed in a `set` or used as `dict` keys and any such use raises `TypeError: unhashable type`.
+
+FINDING: app/models.py | Mutability (not `frozen=True`) means an `Order` can be mutated after being cached, persisted, or shared, so cached/aliased copies silently diverge from the stored record.
+
+FINDING: app/models.py | Equality is structural across all fields rather than identity by `id`, so the same order fetched in two different states compares unequal, breaking deduplication, `in` checks, and test assertions that expect identity semantics.
+
+FINDING: app/models.py | `Order` is not `kw_only=True` and its first two fields `id` and `customer_id` are both bare `int`s, so a positional call like `Order(customer_id, order_id, ...)` transposes them with no error and silently attributes an order to the wrong customer.
+
+FINDING: app/models.py | No field has a default and the dataclass is positional, so appending any new field later (or reordering) silently breaks every existing positional construction site rather than failing loudly at definition time.
+
+FINDING: app/models.py | `customer_id: int` carries no referential guarantee or validation (e.g. non-positive IDs are accepted), so an `Order` can reference a `Customer` that does not exist and the model provides no way to detect it.

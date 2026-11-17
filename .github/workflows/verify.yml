@@ -1,0 +1,29 @@
+name: verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: ShellCheck
+        shell: bash
+        run: |
+          shellcheck setup_fixtures.sh
+          find bench harness -type f -name '*.sh' -print0 | xargs -0 -r shellcheck
+      - name: Python 構文チェック
+        run: python -m compileall -q -f bench harness
+      # bench/*/tests は意図的な欠陥を示すテスト。欠陥の再現は専用スクリプトで検証する。
+      - name: 仕込み欠陥の実行検証
+        run: python harness/verify_defects.py
